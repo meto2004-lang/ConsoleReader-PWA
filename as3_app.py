@@ -4,12 +4,14 @@
 # أوامر التطبيق (حرف واحد): R=تسجيل حركة، L=قراءة حساسات، C=طباعة البرنامج،
 # F=نقطة خط ذكية، T=متابعة خط، U=تراجع.
 # التحكم عن بعد (أزرار الأسهم): w=للأمام s=للخلف a=لف يسارًا d=لف يمينًا x=إيقاف.
+# إرسال الكود من التطبيق: K=بدء الاستلام ثم أسطر الكود ثم E=انتهى،
+#   و G=نفّذ الكود المستلم الآن، و x=إيقاف التنفيذ.
 
 from pybricks.hubs import PrimeHub
 from pybricks.pupdevices import Motor, ColorSensor
 from pybricks.parameters import Port, Button, Direction, Color
 from pybricks.robotics import DriveBase
-from pybricks.tools import wait
+from pybricks.tools import wait, StopWatch
 
 # مدخل قياسي لاستقبال أوامر تطبيق الويب عبر البلوتوث (Pybricks stdin)
 from usys import stdin
@@ -381,6 +383,299 @@ def rc_halt_and_wait():
         rc_stop()
 
 # ---------------------------------------------------------
+# إرسال الكود من التطبيق وتنفيذه على الروبوت
+#
+#   قبل هذه الميزة كان تشغيل برنامج السباق يحتاج تنزيل ملف .py ثم فتحه
+#   في Pybricks Code وتشغيله. الآن يستطيع التطبيق إرسال الكود نفسه إلى
+#   الـ Hub: يبدأ بحرف K ثم أسطر قصيرة (سطر لكل أمر) ثم حرف E، ويليه
+#   حرف G للتنفيذ — أو يبقى الكود محفوظًا في الـ Hub حتى يُطلب G.
+#
+#   صيغة السطر الواحد (نفس أوامر برنامج السباق، بلا أقواس):
+#     T <زاوية>            → robot.turn
+#     S <مسافة>            → robot.straight
+#     F <اتجاه> <مسافة>     → find_line
+#     A <سرعة>             → align_on_line
+#     L <مسافة> <L|R>      → follow_line
+#
+#   التنفيذ لا يستخدم دوال Pybricks الحاجزة (straight/turn) بل يتقدّم
+#   دفعة صغيرة في كل دورة من الحلقة الرئيسية، فيبقى الروبوت يستقبل
+#   حرف x (إيقاف) من التطبيق، ويستجيب لأي زر على الهاب في أي لحظة.
+# ---------------------------------------------------------
+RUN_SPEED        = 220    # مم/ث   — سرعة القطع المستقيم
+RUN_TURN_RATE    = 130    # درجة/ث — سرعة الدوران
+RUN_SEARCH_SPEED = 80     # مم/ث   — سرعة البحث عن الخط
+RUN_FOLLOW_SPEED = 90     # مم/ث   — سرعة متابعة الخط
+RUN_TOL_DIST     = 4      # مم     — سماحية الوصول للمسافة
+RUN_TOL_ANG      = 2      # درجة   — سماحية الوصول للزاوية
+RUN_ALIGN_MAX    = 45     # درجة   — أقصى دوران لمحاذاة الخط
+RUN_MAX_MS       = 120000 # أمان: أقصى مدة تنفيذ، يُلغى بعدها تلقائيًا
+RUN_MAX_LINES    = 160    # أقصى عدد أوامر يُستلم من التطبيق
+RUN_MAX_LINE_LEN = 40     # أقصى طول سطر مستلم (حماية للذاكرة)
+
+code_mode    = False  # هل نحن في منتصف استلام الكود؟
+code_line    = ""     # السطر الجاري تجميعه
+code_new     = []     # المقاطع المستلمة (تُبنى سطرًا بسطر لتوفير الذاكرة)
+code_skipped = 0      # أسطر لم تُفهم أو تجاوزت الحد
+
+run_queue  = []      # الأوامر الجاهزة للتنفيذ (مقاطع)
+run_active = False   # هل يجري تنفيذ الكود الآن؟
+run_index  = 0       # رقم المقطع الجاري
+run_phase  = "start" # "start" = تهيئة المقطع، "go" = تنفيذه
+run_goal_d = 0       # هدف المسافة للمقطع الحالي
+run_goal_h = 0       # هدف الزاوية للمقطع الحالي
+run_base_d = 0       # مسافة البداية للمقطع الحالي
+run_base_h = 0       # زاوية البداية للمقطع الحالي
+run_th     = 30      # عتاة الخط المستخدمة أثناء التنفيذ
+run_watch  = StopWatch()
+
+def _clamp(v, lo, hi):
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v
+
+def seg_label(seg):
+    # نفس شكل السطر في برنامج السباق — ليظهر السجل مفهومًا
+    kind = seg[0]
+    if kind == "turn":
+        return "robot.turn(" + str(seg[1]) + ")"
+    if kind == "straight":
+        return "robot.straight(" + str(seg[1]) + ")"
+    if kind == "find_line":
+        return "find_line(" + str(seg[1]) + ", " + str(seg[2]) + ")"
+    if kind == "align_line":
+        return "align_on_line(" + str(seg[1]) + ")"
+    if kind == "follow_line":
+        return "follow_line(" + str(seg[1]) + ', "' + str(seg[2]) + '")'
+    return str(kind)
+
+def parse_code_line(line):
+    # يحوّل سطرًا قصيرًا من التطبيق إلى مقطع تنفيذ، أو None إن لم يُفهم
+    parts = line.split()
+    if len(parts) < 2:
+        return None
+    try:
+        k = parts[0]
+        if k == "T":
+            return ("turn", int(float(parts[1])))
+        if k == "S":
+            return ("straight", int(float(parts[1])))
+        if k == "F" and len(parts) >= 3:
+            return ("find_line", int(float(parts[1])), int(float(parts[2])))
+        if k == "A":
+            return ("align_line", int(float(parts[1])))
+        if k == "L" and len(parts) >= 3:
+            side = "R" if parts[2].upper()[:1] == "R" else "L"
+            return ("follow_line", int(float(parts[1])), side)
+    except (ValueError, IndexError):
+        return None
+    return None
+
+def code_take_line():
+    # ينهي السطر الجاري ويحوّله فورًا إلى مقطع تنفيذ.
+    # لا نحتفظ بنصوص الأسطر كلها (ذاكرة الهاب محدودة) بل بالمقاطع فقط.
+    global code_line, code_skipped
+    line = code_line
+    code_line = ""
+    if not line:
+        return
+    if len(code_new) >= RUN_MAX_LINES:
+        code_skipped += 1
+        return
+    seg = parse_code_line(line)
+    if seg is None:
+        code_skipped += 1
+    else:
+        code_new.append(seg)
+
+def code_receive_start():
+    # K: بداية استلام كود جديد (يُلغي التنفيذ الجاري أولًا)
+    global code_mode, code_line, code_new, code_skipped
+    if run_active:
+        run_cancel("استلام كود جديد")
+    code_mode = True
+    code_line = ""
+    code_new = []
+    code_skipped = 0
+    print("# 📥 استلام الكود من التطبيق…")
+
+def code_receive_finish():
+    # E: نهاية الاستلام — المقاطع المستلمة تصبح قائمة التنفيذ
+    global code_mode, code_new, code_skipped, run_queue
+    code_take_line()          # آخر سطر إن لم ينتهِ بسطر جديد
+    code_mode = False
+
+    n = len(code_new)
+    skipped = code_skipped
+    if not n:
+        print("# ⚠ لم يصل أي أمر صالح — أبقيت الكود السابق كما هو")
+        hub.speaker.beep(250, 250)
+        code_new = []
+        return
+
+    run_queue = code_new
+    code_new = []
+    msg = "# ✓ استُلم الكود: " + str(n) + " أمرًا"
+    if skipped:
+        msg += " (تجاهلت " + str(skipped) + " سطرًا)"
+    print(msg)
+    hub.speaker.beep(900, 120)
+
+def resync_tracking():
+    # بعد التشغيل: نُعيد نقطة القياس إلى موضع الروبوت الحالي
+    # حتى لا يُسجَّل مسار التنفيذ كأنه حركة يدوية في التسجيل التالي
+    global last_distance, last_heading
+    last_distance = robot.distance()
+    last_heading = hub.imu.heading()
+
+def _run_end(msg, freq):
+    global run_active
+    robot.stop()
+    run_active = False
+    resync_tracking()
+    print(msg)
+    hub.speaker.beep(freq, 200)
+
+def run_start():
+    # G: تنفيذ الكود المستلم الآن
+    global run_active, run_index, run_phase, run_th
+    if not run_queue:
+        print("# ⚠ لا يوجد كود على الهاب — أرسله من التطبيق أولًا")
+        hub.speaker.beep(250, 250)
+        return
+    if run_active:
+        return
+    rc_halt_and_wait()          # لا نبدأ والروبوت يتحرك عن بعد
+    run_active = True
+    run_index = 0
+    run_phase = "start"
+    run_th = estimated_threshold()
+    if run_th is None:
+        run_th = 30
+    run_watch.reset()
+    print("# ▶ بدء تنفيذ الكود (" + str(len(run_queue)) + " أمر) — عتاة الخط = " + str(run_th))
+    print("#   للإيقاف: x من التطبيق أو أي زر على الهاب")
+    hub.speaker.beep(1000, 200)
+
+def run_cancel(reason):
+    if not run_active:
+        robot.stop()
+        return
+    _run_end("# ⏹ أُلغي تنفيذ الكود — " + reason, 300)
+
+def run_finish():
+    _run_end("# ✓ انتهى تنفيذ الكود بنجاح", 800)
+
+def _run_step_straight(dist):
+    global run_phase, run_goal_d
+    if run_phase == "start":
+        run_goal_d = robot.distance() + dist
+        run_phase = "go"
+        return False
+    rem = run_goal_d - robot.distance()
+    if abs(rem) <= RUN_TOL_DIST:
+        robot.stop()
+        return True
+    spd = int(_clamp(abs(rem) * 4, 45, RUN_SPEED))
+    robot.drive(spd if rem > 0 else -spd, 0)
+    return False
+
+def _run_step_turn(angle):
+    global run_phase, run_goal_h
+    if run_phase == "start":
+        # اتجاه الـ IMU مستمر (لا يلتف عند 180) وموجبه مع عقارب الساعة،
+        # وهو نفس اتجاه robot.turn — فالمقارنة مباشرة.
+        run_goal_h = hub.imu.heading() + angle
+        run_phase = "go"
+        return False
+    err = run_goal_h - hub.imu.heading()
+    if abs(err) <= RUN_TOL_ANG:
+        robot.stop()
+        return True
+    rate = int(_clamp(abs(err) * 5, 30, RUN_TURN_RATE))
+    robot.drive(0, rate if err > 0 else -rate)
+    return False
+
+def _run_step_find(direction, max_dist):
+    global run_phase, run_base_d
+    if run_phase == "start":
+        run_base_d = robot.distance()
+        run_phase = "go"
+        return False
+    if left_sensor.reflection() < run_th or right_sensor.reflection() < run_th:
+        robot.stop()
+        return True
+    if abs(robot.distance() - run_base_d) >= max_dist:
+        robot.stop()
+        return True
+    robot.drive(RUN_SEARCH_SPEED if direction >= 0 else -RUN_SEARCH_SPEED, 0)
+    return False
+
+def _run_step_align(speed):
+    global run_phase, run_base_h
+    if run_phase == "start":
+        run_base_h = hub.imu.heading()
+        run_phase = "go"
+        return False
+    if left_sensor.reflection() < run_th and right_sensor.reflection() < run_th:
+        robot.stop()
+        return True
+    if abs(hub.imu.heading() - run_base_h) >= RUN_ALIGN_MAX:
+        robot.stop()
+        return True
+    robot.drive(0, speed)
+    return False
+
+def _run_step_follow(dist, side):
+    global run_phase, run_base_d
+    if run_phase == "start":
+        run_base_d = robot.distance()
+        run_phase = "go"
+        return False
+    if abs(robot.distance() - run_base_d) >= dist:
+        robot.stop()
+        return True
+    s = left_sensor if side == "L" else right_sensor
+    sign = 1 if side == "L" else -1
+    robot.drive(RUN_FOLLOW_SPEED, int(sign * FOLLOW_GAIN * (s.reflection() - run_th)))
+    return False
+
+def run_tick():
+    # خطوة واحدة من تنفيذ الكود — تُنادى من الحلقة الرئيسية كل دورة
+    global run_active, run_index, run_phase
+    if not run_active:
+        return
+    if run_watch.time() > RUN_MAX_MS:
+        run_cancel("تجاوز مدة الأمان")
+        return
+    if run_index >= len(run_queue):
+        run_finish()
+        return
+
+    seg = run_queue[run_index]
+    if run_phase == "start":
+        print("# " + str(run_index + 1) + "/" + str(len(run_queue)) + "  " + seg_label(seg))
+
+    kind = seg[0]
+    if kind == "straight":
+        done = _run_step_straight(seg[1])
+    elif kind == "turn":
+        done = _run_step_turn(seg[1])
+    elif kind == "find_line":
+        done = _run_step_find(seg[1], seg[2])
+    elif kind == "align_line":
+        done = _run_step_align(seg[1])
+    elif kind == "follow_line":
+        done = _run_step_follow(seg[1], seg[2])
+    else:
+        done = True
+
+    if done:
+        run_index += 1
+        run_phase = "start"
+
+# ---------------------------------------------------------
 # قراءة الحساسات تلقائيًا مع الحركة (بدل الضغط على LEFT/L)
 #   - تُجمع العينات دائمًا في الخلفية (تُحسّن حساب عتبة الخط).
 #   - ويُبثّ سطر قياس في السجل أثناء الحركة فقط (بالأسهم أو باليد).
@@ -420,7 +715,9 @@ def auto_read_tick():
     watch_d = d
     watch_h = h
 
-    if AUTO_STREAM and (rc_driving or hand_moved):
+    # أثناء تنفيذ الكود لا نبثّ سطر قياس لكل خطوة (لئلا يمتلئ السجل)،
+    # فالتطبيق يعرض تقدّم التنفيذ سطرًا لكل مقطع.
+    if AUTO_STREAM and not run_active and (rc_driving or hand_moved):
         # سطر مضغوط: d=المسافة h=الاتجاه L/R=الانعكاس
         print("# T d=" + str(int(d)) + " h=" + str(int(h))
               + " L=" + str(l) + " R=" + str(r))
@@ -562,7 +859,39 @@ def do_print_program():
 
 def handle_app_command(cmd):
     # حرف واحد من التطبيق = نفس ضغطة الزر المقابلة على الروبوت
-    global AUTO_STREAM
+    global AUTO_STREAM, code_mode, code_line
+
+    # --- استلام الكود من التطبيق: كل ما بين K و E أسطر نصية ---
+    if code_mode:
+        if cmd == "\n":
+            code_take_line()
+        elif cmd == "E" and not code_line:
+            # نهاية الإرسال — يصل E في بداية سطر جديد (أي أن السطر السابق اكتمل)
+            code_receive_finish()
+        elif cmd != "\r" and len(code_line) < RUN_MAX_LINE_LEN:
+            code_line += cmd
+        return
+    if cmd == "K":
+        code_receive_start()
+        return
+    if cmd == "E":
+        code_receive_finish()
+        return
+    if cmd == "G":
+        run_start()
+        return
+
+    # --- إيقاف: تنفيذ كود جارٍ أو تحرير المحركات ---
+    if cmd == "x":
+        if run_active:
+            run_cancel("من التطبيق")
+        else:
+            rc_halt()                    # تباطؤ ناعم ثم تحرير المحركات
+        return
+
+    # أي أمر آخر أثناء تنفيذ الكود = إيقافه فورًا (أمان)
+    if run_active and cmd != "y" and cmd != "z":
+        run_cancel("أمر جديد من التطبيق")
 
     # --- قراءة الحساسات التلقائية: y تشغيل / z إيقاف ---
     if cmd == "y":
@@ -591,9 +920,6 @@ def handle_app_command(cmd):
         return
     if cmd == "d":                       # لف يمينًا  (مع عقارب الساعة)
         rc_drive(0, RC_TURN)
-        return
-    if cmd == "x":
-        rc_halt()                        # تباطؤ ناعم ثم تحرير المحركات
         return
 
     # أي أمر تدريب: أوقف الدفع عن بعد بنعومة حتى لا تتداخل الحركتان
@@ -635,6 +961,8 @@ print("# التطبيق: R تسجيل حركة | L قراءة حساسات | C �
 print("#          F نقطة خط ذكية | T متابعة خط | U تراجع")
 print("#          أزرار الأسهم: w/s/d/a للتحريك عن بعد (ناعم)، x = إيقاف")
 print("#          القراءة التلقائية: y تشغيل | z إيقاف (سطور # T أثناء الحركة)")
+print("#          إرسال الكود من التطبيق: K استلام ← أسطر ← E انتهى ← G تنفيذ")
+print("#          و x أثناء التنفيذ = إيقافه فورًا")
 print("# أزرار الروبوت ما زالت تعمل:")
 print("# - RIGHT       : تسجيل حركة (دوران ثم مستقيم)")
 print("# - LEFT        : تسجيل قراءات الحساسين (لحساب عتاة الخط)")
@@ -659,10 +987,14 @@ try:
                 hub.speaker.beep(250, 250)
 
         # 2) أزرار الروبوت الفعلية (نفس أولوية الفحص السابقة)
-        #    أي زر يوقف الدفع عن بعد بنعومة أولًا حتى لا تتداخل الحركتان
+        #    أي زر يوقف الدفع عن بعد أو تنفيذ الكود أولًا حتى لا يتداخلا
         pressed = hub.buttons.pressed()
         if pressed and rc_driving:
             rc_halt_and_wait()
+        if pressed and run_active:
+            run_cancel("زر من الهاب")
+            wait_for_release()      # لا ننفّذ وظيفة الزر بعد إلغاء التنفيذ
+            pressed = ()
 
         if Button.LEFT in pressed and Button.RIGHT in pressed:
             do_undo()
@@ -691,10 +1023,15 @@ try:
         # 3) تنفيذ دورة واحدة من التحكم عن بعد (تسارع محدود + إيقاف تلقائي)
         rc_tick()
 
+        # 3.5) تنفيذ دورة واحدة من الكود المستلم من التطبيق (دفعات صغيرة)
+        run_tick()
+
         # 4) قراءة الحساسات تلقائيًا (جمع عينات + بثّ أثناء الحركة)
         auto_read_tick()
 
-        wait(30)
+        # أثناء استلام الكود نُسرّع الدورة (10ms) حتى نفرّغ مخزن الإدخال
+        # أسرع من وصول الأسطر من التطبيق، فلا يضيع أي حرف
+        wait(10 if code_mode else 30)
 
 finally:
     hub.light.on(Color.RED)
