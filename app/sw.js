@@ -2,7 +2,7 @@
    الهدف: أن تفتح الصفحة في الميدان حتى بلا إنترنت، وتتحدّث تلقائيًا عند توفر اتصال.
    كل المسارات نسبية لأن الصفحة قد تُقدَّم من مسار فرعي (GitHub Pages: /<repo>/app/). */
 
-const CACHE = "consolereader-v1";
+const CACHE = "consolereader-v2";
 
 const ASSETS = [
   "./",

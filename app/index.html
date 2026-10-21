@@ -42,6 +42,8 @@
   .btn-connect{background:var(--blue)}
   .btn-start{background:var(--green)}
   .btn-stop{background:var(--red)}
+  .btn-send{background:var(--violet)}
+  .btn-send-run{background:var(--green)}
   .grid{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:14px 0}
   /* ===== اللوحة الموحّدة: تحريك الروبوت + أوامر التدريب جنبًا إلى جنب ===== */
   .dash{display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start}
@@ -233,10 +235,19 @@
   </div>
 
   <h2>📄 برنامج جاهز للتشغيل على الروبوت <span class="badge" id="progBadge" hidden>جاهز ✓</span></h2>
-  <p class="rc-note">يُملأ تلقائيًا عند وصول البرنامج من الروبوت (زر «🏁 طباعة برنامج السباق الكامل»). نزّله كملف <code>race_program.py</code>، افتحه في <b>Pybricks Code</b> واضغط «Download and Run» — أو انسخه والصقه هناك مباشرة.</p>
+  <p class="rc-note">يُملأ تلقائيًا عند وصول البرنامج من الروبوت (زر «🏁 طباعة برنامج السباق الكامل»). يمكنك <b>تعديل سطوره هنا</b> ثم إرساله إلى الروبوت مباشرة.</p>
   <p class="rc-note" id="progNote" hidden style="color:#fde68a">⚠️ لم تصل علامات الالتقاط من الروبوت، فالبرنامج استُخرج من السجل (نسخة <code>as3_app.py</code> أقدم). الملف صالح للتشغيل، لكن أعد تنزيل <code>as3_app.py</code> المحدَّث على الـ Hub للحصول على الملف الكامل مع ملاحظات المعايرة.</p>
-  <textarea id="progOut" dir="ltr" readonly spellcheck="false"
+  <textarea id="progOut" dir="ltr" spellcheck="false"
     placeholder="لم يصل برنامج بعد — اضغط «🏁 طباعة برنامج السباق الكامل» أعلاه…"></textarea>
+
+  <p class="rc-note" style="margin-top:12px">📤 <b>إرسال الكود إلى الروبوت</b> — يرسل التطبيق أوامر الكود عبر البلوتوث (بدون Pybricks Code
+    وبدون ملفات) ثم ينفّذها الـ Hub أمرًا بعد أمر. يعمل مع <code>as3_app.py</code> المحدَّث على الـ Hub.
+    التنفيذ يمكن إيقافه في أي لحظة بزر «⏹ إيقاف التنفيذ» أو أي زر على الـ Hub.</p>
+  <div class="row">
+    <button class="grow btn-send-run" id="btnSendRun" disabled>📤 إرسال الكود وتشغيله على الروبوت</button>
+    <button class="btn-send" id="btnSendOnly" disabled>📥 إرسال فقط</button>
+    <button class="btn-stop" id="btnStopRun" disabled>⏹ إيقاف التنفيذ</button>
+  </div>
   <div class="row">
     <button class="grow" id="btnCopyProgram">📋 نسخ البرنامج</button>
     <button class="grow" id="btnDownloadProgram">⬇️ تنزيل race_program.py</button>
@@ -252,7 +263,8 @@
       <li>افتح هذه الصفحة في متصفح <b>Chrome</b> (كمبيوتر أو أندرويد)، وشغّل البلوتوث، واضغط «اتصال بالبلوتوث» واختر الـ Hub من القائمة.</li>
       <li>اضغط «▶ تشغيل برنامج التدريب» (أو شغّل البرنامج من زر الـ Hub نفسه) وانتظر ظهور <code>APP_READY</code> في السجل وإضاءة الـ Hub باللون الأزرق.</li>
       <li>ادفع الروبوت بيدك إلى النقطة المطلوبة، ثم اضغط زر التطبيق المناسب — ستصدر صفارة من الروبوت وتظهر الحركة المسجلة في السجل، تمامًا كما لو ضغطت أزرار الروبوت.</li>
-      <li>عند الانتهاء اضغط «🏁 طباعة برنامج السباق الكامل»، فيظهر البرنامج في السجل <b>ويُجهَّز تلقائيًا</b> في لوحة «📄 برنامج جاهز للتشغيل». اضغط «⬇️ تنزيل race_program.py» ثم افتح الملف في Pybricks Code واضغط «Download and Run» (أو «📋 نسخ البرنامج» والصقه هناك).</li>
+      <li>عند الانتهاء اضغط «🏁 طباعة برنامج السباق الكامل»، فيظهر البرنامج في السجل <b>ويُجهَّز تلقائيًا</b> في لوحة «📄 برنامج جاهز للتشغيل».</li>
+      <li>لتشغيله على الروبوت فورًا: عدّل ما تريد في اللوحة ثم اضغط <b>«📤 إرسال الكود وتشغيله على الروبوت»</b> — يبثّ التطبيق أوامر البرنامج عبر البلوتوث وينفّذها الـ Hub سطرًا بعد سطر، ويظهر التقدّم في السجل. زر «⏹ إيقاف التنفيذ» (أو أي زر على الـ Hub) يوقفه في أي لحظة.<br>وإن أردت ملفًا مستقلًا: «⬇️ تنزيل race_program.py» ثم افتحه في Pybricks Code واضغط «Download and Run» (أو «📋 نسخ البرنامج» والصقه هناك).</li>
     </ol>
     <ul>
       <li>أزرار الروبوت الفعلية ما زالت تعمل أثناء التدريب — يمكنك الخلط بينها وبين التطبيق بحرية.</li>
@@ -304,6 +316,10 @@ function setConnectedUI(on) {
   $("btnDisconnect").disabled = !on;
   $("btnStart").disabled = !on || mode === "nus";
   $("btnStop").disabled = !on || mode === "nus";
+  // إرسال الكود وتنفيذه يحتاج اتصالًا قائمًا
+  $("btnSendRun").disabled = !on || sendingProgram;
+  $("btnSendOnly").disabled = !on || sendingProgram;
+  $("btnStopRun").disabled = !on;
   // أزرار التدريب تبقى قابلة للضغط دائمًا؛ إذا لم يكن هناك اتصال تعرض رسالة واضحة في السجل
   trainButtons.forEach(b => b.disabled = false);
   $("needConn").hidden = on;
@@ -326,6 +342,7 @@ let pendingLine = "";
 let progBuf = null;        // أسطر البرنامج أثناء الالتقاط بين علامتي #@@PROGRAM_*@@
 let programText = "";      // آخر برنامج كامل جاهز للتنزيل/النسخ
 let sawMarkers = false;    // هل وصلت علامات الالتقاط من الروبوت؟ (نسخة محدَّثة)
+let sendingProgram = false; // هل يجري إرسال الكود إلى الروبوت الآن؟
 
 // يضع البرنامج في اللوحة ويحدّث الحالة
 function setProgram(text, viaLog) {
@@ -384,6 +401,16 @@ function appendLog(text) {
     }
     if (progBuf) progBuf.push(line);
     shown += line + "\n";
+
+    // إشعارات تنفيذ الكود المُرسَل إلى الروبوت (بلا تكرار في السجل)
+    if (line.indexOf("# ▶ بدء تنفيذ الكود") >= 0)
+      showToast("▶ الروبوت ينفّذ الكود الآن — «⏹ إيقاف التنفيذ» لإيقافه", "", 5000);
+    else if (line.indexOf("# ✓ انتهى تنفيذ الكود") >= 0)
+      showToast("✅ انتهى تنفيذ الكود على الروبوت", "ok", 5000);
+    else if (line.indexOf("# ⏹ أُلغي تنفيذ") >= 0)
+      showToast(line.replace(/^#\s*/, ""), "", 5000);
+    else if (line.indexOf("# ✓ استُلم الكود") >= 0)
+      showToast("📥 " + line.replace(/^#\s*/, ""), "ok", 3500);
     if (line.indexOf("# برنامج السباق الذكي") >= 0) allowFill = true;   // برنامج جديد مطبوع
 
     // عدّاد الأوامر المسجّلة: أسطر الحركة فقط (لا تُحسب أسطر تهيئة البرنامج المطبوعة)
@@ -663,6 +690,109 @@ async function copyText(text, okMsg) {
 function extractProgram() {
   return programText || logProgram();
 }
+
+// ===== إرسال الكود إلى الروبوت =====
+// نحوّل سطور برنامج السباق إلى أوامر قصيرة يفهمها as3_app.py:
+//   T زاوية | S مسافة | F اتجاه مسافة | A سرعة | L مسافة جهة
+// تُرسل بعد حرف K وتنتهي بحرف E، ثم G لبدء التنفيذ على الـ Hub.
+const progNum = s => Number(String(s).trim());
+function progArgs(list) {
+  // يتجاهل أسماء المعاملات: follow_line(400, side="L") → ["400", "\"L\""]
+  return String(list).split(",").map(a => {
+    const i = a.indexOf("=");
+    return (i >= 0 ? a.slice(i + 1) : a).trim();
+  }).filter(a => a.length);
+}
+function progSide(v) {
+  const s = String(v || "L").replace(/["']/g, "").trim().toUpperCase();
+  return s.charAt(0) === "R" ? "R" : "L";
+}
+function programToRobotLines(text) {
+  const lines = [], skipped = [];
+  let inRun = false, sawRun = false;
+  for (const raw of String(text).split("\n")) {
+    const code = raw.split("#")[0];
+    const t = code.trim();
+    if (!t) continue;
+    if (/^def\s+run\s*\(/.test(t)) { inRun = true; sawRun = true; continue; }
+    if (inRun && !/^\s/.test(code)) inRun = false;      // خرجنا من دالة run
+    if (sawRun && !inRun) continue;                     // نتجاهل بقية الملف
+    const push = (cmd, value) => {
+      if (!Number.isFinite(value)) { skipped.push(t); return; }
+      lines.push(cmd + " " + Math.round(value));
+    };
+    let m;
+    if ((m = t.match(/^robot\.turn\(\s*([^)]*)\)$/))) {
+      push("T", progNum(m[1]));
+    } else if ((m = t.match(/^robot\.straight\(\s*([^)]*)\)$/))) {
+      push("S", progNum(m[1]));
+    } else if ((m = t.match(/^find_line\(\s*([^)]*)\)$/))) {
+      const a = progArgs(m[1]);
+      const dir = a.length ? (progNum(a[0]) < 0 ? -1 : 1) : 1;
+      const dist = a.length > 1 ? progNum(a[1]) : 250;
+      if (!Number.isFinite(dist)) { skipped.push(t); continue; }
+      lines.push("F " + dir + " " + Math.round(dist));
+    } else if ((m = t.match(/^align_on_line\(\s*([^)]*)\)$/))) {
+      const a = progArgs(m[1]);
+      push("A", a.length ? progNum(a[0]) : 25);
+    } else if ((m = t.match(/^follow_line\(\s*([^)]*)\)$/))) {
+      const a = progArgs(m[1]);
+      if (!a.length || !Number.isFinite(progNum(a[0]))) { skipped.push(t); continue; }
+      lines.push("L " + Math.round(progNum(a[0])) + " " + progSide(a[1]));
+    } else if (/^(robot\.|find_line|align_on_line|follow_line)/.test(t)
+               && !/^robot\.(reset|use_gyro|settings)\(/.test(t)) {
+      skipped.push(t);                                  // أمر غير مدعوم (robot.stop مثلًا)
+    }
+  }
+  return { lines, skipped };
+}
+
+function setSendBusy(on) {
+  $("btnSendRun").disabled = on || !mode;
+  $("btnSendOnly").disabled = on || !mode;
+  $("btnSendRun").textContent = on ? "⏳ جارٍ إرسال الكود…" : "📤 إرسال الكود وتشغيله على الروبوت";
+}
+
+async function sendProgramToRobot(runIt) {
+  if (!mode) {
+    showToast("✗ غير متصل بالروبوت — اضغط «🔵 اتصال بالبلوتوث» واختر الـ Hub أولًا", "err", 5000);
+    return;
+  }
+  const p = extractProgram();
+  if (!p || !p.trim()) {
+    showToast("✗ لا يوجد كود في اللوحة — اضغط «🏁 طباعة برنامج السباق الكامل» أولًا", "err", 5500);
+    return;
+  }
+  const { lines, skipped } = programToRobotLines(p);
+  if (!lines.length) {
+    showToast("✗ لم أجد أوامر قابلة للإرسال — المدعوم: robot.turn / robot.straight /"
+      + " find_line / align_on_line / follow_line", "err", 7000);
+    return;
+  }
+  if (sendingProgram) { showToast("⏳ الإرسال جارٍ بالفعل…"); return; }
+  sendingProgram = true;
+  rcStop(true);
+  setSendBusy(true);
+  try {
+    await sendCmd("K");                                  // بداية استلام الكود على الـ Hub
+    for (const line of lines) {
+      await sendCmd(line + "\n");
+      await new Promise(r => setTimeout(r, 20));         // مهلة صغيرة حتى يقرأ الـ Hub كل سطر
+    }
+    await sendCmd("E");                                  // انتهى الاستلام
+    if (runIt) {
+      await new Promise(r => setTimeout(r, 80));
+      await sendCmd("G");                                // نفّذ الكود المستلم
+    }
+    showToast("📤 أُرسل الكود إلى الروبوت (" + lines.length + " أمر"
+      + (skipped.length ? " — تجاهلت " + skipped.length + " سطرًا" : "") + ")"
+      + (runIt ? " — التنفيذ يبدأ الآن" : " — اضغط «📤 إرسال الكود وتشغيله» للتنفيذ"),
+      "ok", 5000);
+  } finally {
+    sendingProgram = false;
+    setSendBusy(false);
+  }
+}
 // تحويل سطور القياس # T إلى CSV (زمن تقديري 0.1 ثانية بين العينات)
 function telemetryCsv() {
   const re = /^# T d=(-?[\d.]+) h=(-?[\d.]+) L=([\d.]+) R=([\d.]+)/;
@@ -694,6 +824,15 @@ $("btnDownloadProgram").onclick = () => {
   if (!p) { showToast("✗ لم يصل برنامج بعد — اضغط «🏁 طباعة برنامج السباق الكامل» أولًا", "err", 5000); return; }
   downloadText("race_program.py", p, "text/x-python");
 };
+$("btnSendRun").onclick = () => sendProgramToRobot(true);
+$("btnSendOnly").onclick = () => sendProgramToRobot(false);
+$("btnStopRun").onclick = () => {
+  if (!mode) { showToast("✗ غير متصل بالروبوت", "err"); return; }
+  sendCmd("x");   // x أثناء التنفيذ = إيقاف فوري في as3_app.py
+  showToast("⏹ أُرسل أمر إيقاف التنفيذ");
+};
+// تعديل الكود يدويًا في اللوحة يصبح هو ما يُرسل إلى الروبوت
+$("progOut").addEventListener("input", e => { programText = e.target.value; allowFill = false; });
 $("btnClearProgram").onclick = () => {
   programText = ""; allowFill = false;           // لا تُعِد الملء حتى يُطبع برنامج جديد
   $("progOut").value = ""; $("progBadge").hidden = true; $("progNote").hidden = true;
