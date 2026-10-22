@@ -34,6 +34,10 @@ MIN_SEARCH    = 80   # أدنى مسافة بحث عن الخط
 FOLLOW_GAIN   = 2.5  # معامل التحكم P لمتابعة الخط
 ALIGN_SPEED   = 25   # سرعة الدوران للمحاذاة (deg/s)
 
+# تسارع الحركات في برنامج السباق الناتج (نعومة أثناء التشغيل)
+MOVE_ACCEL      = 1200
+MOVE_TURN_ACCEL = 1500
+
 # =========================================================
 # 3) سجلات التدريب
 # =========================================================
@@ -46,8 +50,34 @@ ALIGN_SPEED   = 25   # سرعة الدوران للمحاذاة (deg/s)
 # حفظ "المرجع السابق" داخل العنصر يسمح للتراجع بإعادته بدقة.
 actions = []
 
-# كل قياسات الانعكاس (لحساب عتاة الخط تلقائياً)
-refl_samples = []
+# نطاق الانعكاس (أظلم وأفتح قياس) لحساب عتاة الخط تلقائيًا.
+#   في السابق كانت تُخزَّن كل العينات في قائمة (حتى 400 عنصر ≈ 3.2KB)،
+#   وذاكرة الـ Hub ضيقة جدًا. لا نحتاج لحساب العتبة إلا أصغر قيمة وأكبرها،
+#   فحفظهما فقط يوفّر الذاكرة ويُلغي كلفة pop(0) في كل قراءة.
+class SampleRange:
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.lo = 101      # أظلم قياس (الخط) — 101 أكبر من أي انعكاس ممكن
+        self.hi = -1       # أفتح قياس (الخلفية)
+        self.n  = 0        # عدد العينات (للتشخيص)
+
+    def add(self, v):
+        if v < self.lo:
+            self.lo = v
+        if v > self.hi:
+            self.hi = v
+        self.n += 1
+
+    def ok(self):
+        # نحتاج عيّنتين على الأقل وباينًا واضحًا بين الخط والخلفية
+        return self.n >= 2 and self.hi >= 0 and self.hi - self.lo >= 25
+
+    def span(self):
+        return (self.hi - self.lo) if self.n else 0
+
+refl = SampleRange()
 
 # =========================================================
 # 4) دوال مساعدة
@@ -78,16 +108,17 @@ def setup_lines(include_sensors):
     lines += [
         "robot = DriveBase(left_motor, right_motor, " + str(WHEEL_DIAMETER) + ", " + str(AXLE_TRACK) + ")",
         "robot.use_gyro(True)",
+        "# تسارع/تباطؤ محدود = حركة أنعم بلا انتفاضة عند البداية والتوقف",
+        "robot.settings(straight_acceleration=" + str(MOVE_ACCEL)
+            + ", turn_acceleration=" + str(MOVE_TURN_ACCEL) + ")",
         "robot.reset()",
     ]
     return lines
 
 def estimated_threshold():
     # عتاة الخط = منتصف المسافة بين أفتح قياس (خلفية) وأظلم قياس (خط)
-    if len(refl_samples) >= 2:
-        lo, hi = min(refl_samples), max(refl_samples)
-        if hi - lo >= 20:
-            return (hi + lo) // 2
+    if refl.ok():
+        return (refl.hi + refl.lo) // 2
     return None
 
 def smart_helpers_lines():
@@ -105,7 +136,7 @@ def smart_helpers_lines():
         th_line = "LINE_THRESHOLD = 30  # عتاة الخط - عايِرها: قِس فوق الخط وفوق الخلفية بزر LEFT"
     else:
         th_line = ("LINE_THRESHOLD = " + str(th) + "  # محسوبة من قياساتك"
-                   + " (الخط ≈ " + str(min(refl_samples)) + "، الخلفية ≈ " + str(max(refl_samples)) + ")")
+                   + " (الخط ≈ " + str(refl.lo) + "، الخلفية ≈ " + str(refl.hi) + ")")
     return [
         "# --- دوال التصحيح الذكي بالحساسات ---",
         th_line,
@@ -136,12 +167,14 @@ def smart_helpers_lines():
         "",
         'def follow_line(dist, side="L", speed=90):',
         "    # يتبع حافة الخط بتحكم P لمسافة dist مم (side = الحساس الذي يتبع الحافة)",
+        "    # المسافة السالبة = متابعة الخط أثناء الرجوع للخلف",
         '    s = left_sensor if side == "L" else right_sensor',
         '    sign = 1 if side == "L" else -1',
+        '    spd = speed if dist >= 0 else -speed',
         "    robot.reset()",
-        "    while robot.distance() < dist:",
+        "    while abs(robot.distance()) < abs(dist):",
         "        error = s.reflection() - LINE_THRESHOLD",
-        "        robot.drive(speed, sign * (" + str(FOLLOW_GAIN) + ") * error)",
+        "        robot.drive(spd, sign * (" + str(FOLLOW_GAIN) + ") * error)",
         "        wait(10)",
         "    robot.stop()",
     ]
@@ -159,6 +192,7 @@ def format_seg(seg):
         return "align_on_line(" + str(val) + ")"
     if kind == "follow_line":
         dist, side = val
+        # نطبع الإشارة كما هي: المسافة السالبة = متابعة الخط أثناء الرجوع
         return "follow_line(" + str(dist) + ', "' + side + '")'
     return "# ? " + str(kind) + "=" + str(val)
 
@@ -175,6 +209,20 @@ def merged_moves():
             else:
                 merged.append((seg[0], seg[1]))
     return merged
+
+MAX_ACTIONS = 60   # أقصى عدد تسجيلات (ذاكرة الـ Hub محدودة)
+
+def push_action(kind, content, prev_dist=None, prev_head=None):
+    # يضيف تسجيلًا مع احترام الحد الأقصى؛ يعيد False إن رُفض.
+    # عند الرفض لا نحرّك نقطة القياس: الحركة تبقى «غير مسجَّلة» فيلتقطها
+    # التسجيل التالي بدل أن تُفقد بصمت.
+    if len(actions) >= MAX_ACTIONS:
+        print("# ⚠ بلغ الحد الأقصى للتسجيلات (" + str(MAX_ACTIONS)
+              + ") — احذف بعضها بـ U ثم أعد المحاولة")
+        hub.speaker.beep(250, 250)
+        return False
+    actions.append((kind, content, prev_dist, prev_head))
+    return True
 
 def print_full_program():
     # زر واحد يطبع برنامج سباق ذكياً كاملاً جاهزاً للنسخ
@@ -224,8 +272,9 @@ def print_full_program():
             if kind == "sensor":
                 for line in content:
                     print(line)
-        if refl_samples:
-            print("# عيّنات الانعكاس: الأقل=" + str(min(refl_samples)) + "، الأعلى=" + str(max(refl_samples)))
+        if refl.n:
+            print("# نطاق الانعكاس: الأقل=" + str(refl.lo) + "، الأعلى=" + str(refl.hi)
+                  + " (" + str(refl.n) + " عينة)")
             th = estimated_threshold()
             if th is not None:
                 print("# عتاة الخط المقترحة = " + str(th))
@@ -295,7 +344,7 @@ try:
 
             l = left_sensor.reflection()
             r = right_sensor.reflection()
-            refl_samples.append(min(l, r))
+            refl.add(l if l < r else r)
 
             segs = []
             if abs(diff_head) >= MIN_ANG:
@@ -311,12 +360,12 @@ try:
             if l < th and r < th:
                 segs.append(("align_line", ALIGN_SPEED))
 
-            actions.append(("move", segs, last_distance, last_heading))
-            for seg in segs:
-                print(format_seg(seg))
-            last_distance = curr_distance
-            last_heading  = curr_heading
-            hub.speaker.beep(500, 80)
+            if push_action("move", segs, last_distance, last_heading):
+                for seg in segs:
+                    print(format_seg(seg))
+                last_distance = curr_distance
+                last_heading  = curr_heading
+                hub.speaker.beep(500, 80)
             wait_for_release()
 
         elif Button.CENTER in pressed and Button.RIGHT in pressed:
@@ -328,7 +377,7 @@ try:
 
             l = left_sensor.reflection()
             r = right_sensor.reflection()
-            refl_samples.append(min(l, r))
+            refl.add(l if l < r else r)
 
             segs = []
             if abs(diff_head) >= MIN_ANG:
@@ -339,12 +388,12 @@ try:
                 segs.append(("follow_line", (int(round(abs(diff_dist))), side)))
 
             if segs:
-                actions.append(("move", segs, last_distance, last_heading))
-                for seg in segs:
-                    print(format_seg(seg))
-                last_distance = curr_distance
-                last_heading  = curr_heading
-                hub.speaker.beep(550, 80)
+                if push_action("move", segs, last_distance, last_heading):
+                    for seg in segs:
+                        print(format_seg(seg))
+                    last_distance = curr_distance
+                    last_heading  = curr_heading
+                    hub.speaker.beep(550, 80)
             else:
                 print("# حركة أصغر من العتبة - تم تجاهلها")
             wait_for_release()
@@ -370,15 +419,15 @@ try:
 
             if segs:
                 # نحفظ المرجع السابق داخل العنصر حتى يستعيده التراجع
-                actions.append(("move", segs, last_distance, last_heading))
-                for seg in segs:
-                    print(format_seg(seg))
-                last_distance = curr_distance
-                last_heading  = curr_heading
-                if did_turn:
-                    hub.speaker.beep(800, 80)
-                if did_straight:
-                    hub.speaker.beep(600, 80)
+                if push_action("move", segs, last_distance, last_heading):
+                    for seg in segs:
+                        print(format_seg(seg))
+                    last_distance = curr_distance
+                    last_heading  = curr_heading
+                    if did_turn:
+                        hub.speaker.beep(800, 80)
+                    if did_straight:
+                        hub.speaker.beep(600, 80)
             else:
                 print("# حركة أصغر من العتبة - تم تجاهلها")
 
@@ -387,8 +436,8 @@ try:
         elif Button.LEFT in pressed:
             l_line, l_ref = print_sensor("LEFT sensor (Port.C)", left_sensor)
             r_line, r_ref = print_sensor("RIGHT sensor (Port.D)", right_sensor)
-            actions.append(("sensor", [l_line, r_line], None, None))
-            refl_samples.append(min(l_ref, r_ref))
+            refl.add(l_ref if l_ref < r_ref else r_ref)
+            push_action("sensor", [l_line, r_line])
             hub.speaker.beep(750, 80)
             wait_for_release()
 

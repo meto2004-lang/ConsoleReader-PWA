@@ -76,10 +76,16 @@ exit /b 0
 
 :showip
 rem prints one clean URL per IPv4 address (strips the spaces ipconfig adds)
+rem ويرشّح العناوين غير المفيدة (loopback / APIPA) ويعلّم العناوين غير المعتادة
+rem مثل عناوين VPN حتى لا يجرب المستخدم عنوانًا لا يصل منه الجوال.
 set "IP=%~1"
 if not defined IP exit /b 0
 for /f "tokens=* delims= " %%z in ("%IP%") do set "IP=%%z"
-echo      http://%IP%:%PORT%/app/
+echo %IP% | findstr /B /C:"127." >nul && exit /b 0
+echo %IP% | findstr /B /C:"169.254." >nul && exit /b 0
+echo %IP% | findstr /B /C:"192.168." >nul && (echo      http://%IP%:%PORT%/app/ & exit /b 0)
+echo %IP% | findstr /B /C:"10." >nul && (echo      http://%IP%:%PORT%/app/ & exit /b 0)
+echo      http://%IP%:%PORT%/app/   (check: Wi-Fi address, not VPN)
 exit /b 0
 
 :nopython

@@ -141,6 +141,7 @@
     <span>• الاسم: <b id="diagName">—</b></span>
     <span>• APP_READY ظهر؟ <b id="diagReady">لا</b></span>
     <span>• علامات البرنامج: <b id="diagMarkers">لا</b></span>
+    <span>• نسخة الـ Hub: <b id="diagVer">—</b></span>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
@@ -148,6 +149,7 @@
   <div class="row">
     <button class="btn-connect grow" id="btnConnect">🔵 اتصال بالبلوتوث</button>
     <button id="btnConnectAny" title="إذا لم يظهر الروبوت في القائمة">اتصال بأي جهاز</button>
+    <button id="btnReconnect" hidden>🔁 إعادة الاتصال</button>
     <button id="btnDisconnect" disabled>قطع الاتصال</button>
   </div>
   <div class="row">
@@ -241,8 +243,11 @@
     placeholder="لم يصل برنامج بعد — اضغط «🏁 طباعة برنامج السباق الكامل» أعلاه…"></textarea>
 
   <p class="rc-note" style="margin-top:12px">📤 <b>إرسال الكود إلى الروبوت</b> — يرسل التطبيق أوامر الكود عبر البلوتوث (بدون Pybricks Code
-    وبدون ملفات) ثم ينفّذها الـ Hub أمرًا بعد أمر. يعمل مع <code>as3_app.py</code> المحدَّث على الـ Hub.
-    التنفيذ يمكن إيقافه في أي لحظة بزر «⏹ إيقاف التنفيذ» أو أي زر على الـ Hub.</p>
+    وبدون ملفات) ثم ينفّذها الـ Hub أمرًا بعد أمر، ويؤكّد الـ Hub عدد الأوامر التي وصلته قبل أن يبدأ.
+    ما يُرسل هو <b>تسلسل الحركات</b> (دوران/مستقيم/بحث/محاذاة/متابعة) مع <b>عتاة الخط المكتوبة في اللوحة</b>؛
+    أما سرعات التنفيذ ومعامل المتابعة فتبقى من ثوابت <code>as3_app.py</code> على الـ Hub.
+    التنفيذ يمكن إيقافه في أي لحظة بزر «⏹ إيقاف التنفيذ» أو أي زر على الـ Hub،
+    <b>ويتوقف تلقائيًا إذا انقطع الاتصال</b> بالتطبيق (نبضة حياة كل ثانية).</p>
   <div class="row">
     <button class="grow btn-send-run" id="btnSendRun" disabled>📤 إرسال الكود وتشغيله على الروبوت</button>
     <button class="btn-send" id="btnSendOnly" disabled>📥 إرسال فقط</button>
@@ -264,7 +269,8 @@
       <li>اضغط «▶ تشغيل برنامج التدريب» (أو شغّل البرنامج من زر الـ Hub نفسه) وانتظر ظهور <code>APP_READY</code> في السجل وإضاءة الـ Hub باللون الأزرق.</li>
       <li>ادفع الروبوت بيدك إلى النقطة المطلوبة، ثم اضغط زر التطبيق المناسب — ستصدر صفارة من الروبوت وتظهر الحركة المسجلة في السجل، تمامًا كما لو ضغطت أزرار الروبوت.</li>
       <li>عند الانتهاء اضغط «🏁 طباعة برنامج السباق الكامل»، فيظهر البرنامج في السجل <b>ويُجهَّز تلقائيًا</b> في لوحة «📄 برنامج جاهز للتشغيل».</li>
-      <li>لتشغيله على الروبوت فورًا: عدّل ما تريد في اللوحة ثم اضغط <b>«📤 إرسال الكود وتشغيله على الروبوت»</b> — يبثّ التطبيق أوامر البرنامج عبر البلوتوث وينفّذها الـ Hub سطرًا بعد سطر، ويظهر التقدّم في السجل. زر «⏹ إيقاف التنفيذ» (أو أي زر على الـ Hub) يوقفه في أي لحظة.<br>وإن أردت ملفًا مستقلًا: «⬇️ تنزيل race_program.py» ثم افتحه في Pybricks Code واضغط «Download and Run» (أو «📋 نسخ البرنامج» والصقه هناك).</li>
+      <li>لتشغيله على الروبوت فورًا: عدّل ما تريد في اللوحة ثم اضغط <b>«📤 إرسال الكود وتشغيله على الروبوت»</b> — يبثّ التطبيق أوامر البرنامج في حزم سريعة، ويؤكّد الـ Hub العدد قبل البدء، ثم ينفّذها أمرًا بعد أمر ويظهر التقدّم في السجل. زر «⏹ إيقاف التنفيذ» (أو أي زر على الـ Hub) يوقفه في أي لحظة، وكذلك انقطاع الاتصال.<br>وإن أردت ملفًا مستقلًا: «⬇️ تنزيل race_program.py» ثم افتحه في Pybricks Code واضغط «Download and Run» (أو «📋 نسخ البرنامج» والصقه هناك).</li>
+      <li>تعديل <code>LINE_THRESHOLD</code> في اللوحة يُرسل مع الكود ويُستخدم في التنفيذ المباشر؛ أما سرعات <code>RUN_*</code> و<code>FOLLOW_GAIN</code> فتُعدَّل في <code>as3_app.py</code> على الـ Hub.</li>
     </ol>
     <ul>
       <li>أزرار الروبوت الفعلية ما زالت تعمل أثناء التدريب — يمكنك الخلط بينها وبين التطبيق بحرية.</li>
@@ -272,6 +278,7 @@
       <li>للتحكم عن بعد اضغط مع الاستمرار على أسهم لوحة التحكم (أو الأسهم في لوحة المفاتيح / <code>W A S D</code>)؛ الروبوت يتوقف عند رفع الإصبع، وتوقف تلقائيًا خلال نصف ثانية إذا انقطع الاتصال.</li>
       <li>لا يعمل Web Bluetooth على آيفون/Safari ولا على Firefox — استخدم Chrome على أندرويد أو الكمبيوتر.</li>
       <li>يجب فتح الصفحة عبر <code>https</code> أو <code>localhost</code> (مثل GitHub Pages) حتى يسمح المتصفح بالبلوتوث.</li>
+      <li>الشاشة لا تنام أثناء الاتصال (Wake Lock) كي لا تتوقف نبضات التحكم، وإذا انقطع الاتصال يظهر زر «🔁 إعادة الاتصال».</li>
     </ul>
   </details>
 </div>
@@ -300,6 +307,7 @@ function updateDiag() {
   n.textContent = device && device.name ? device.name : "—";
   r.textContent = (logEl.textContent.indexOf("APP_READY") >= 0) ? "نعم" : "لا";
   mk.textContent = sawMarkers ? "نعم" : "لا (نسخة روبوت أقدم)";
+  $("diagVer").textContent = hubVersion ? ("v" + hubVersion) : "—";
   d.hidden = !mode && !(device && device.gatt && device.gatt.connected);
 }
 
@@ -343,6 +351,14 @@ let progBuf = null;        // أسطر البرنامج أثناء الالتق�
 let programText = "";      // آخر برنامج كامل جاهز للتنزيل/النسخ
 let sawMarkers = false;    // هل وصلت علامات الالتقاط من الروبوت؟ (نسخة محدَّثة)
 let sendingProgram = false; // هل يجري إرسال الكود إلى الروبوت الآن؟
+let hubVersion = "";       // نسخة as3_app.py على الـ Hub (من سطر HUB_VERSION)
+// سقف السجل: بدونه ينمو النص بلا حدّ (‏~27KB/دقيقة في البثّ) وتتجمّد
+// الواجهة على الجوال بعد ربع ساعة. التصدير ينبّه إن كان السجل مقصوصًا.
+const LOG_MAX_LINES = 3000;
+let logLines = 0;          // عدد الأسطر المعروضة الآن
+let logTrimmed = 0;        // كم سطرًا قُصّ من الأعلى
+const telemetry = [];      // عيّنات # T بطوابع زمنية حقيقية (CSV)
+const bootTime = performance.now();
 
 // يضع البرنامج في اللوحة ويحدّث الحالة
 function setProgram(text, viaLog) {
@@ -401,17 +417,31 @@ function appendLog(text) {
     }
     if (progBuf) progBuf.push(line);
     shown += line + "\n";
+    pushInbox(line);
 
     // إشعارات تنفيذ الكود المُرسَل إلى الروبوت (بلا تكرار في السجل)
     if (line.indexOf("# ▶ بدء تنفيذ الكود") >= 0)
       showToast("▶ الروبوت ينفّذ الكود الآن — «⏹ إيقاف التنفيذ» لإيقافه", "", 5000);
-    else if (line.indexOf("# ✓ انتهى تنفيذ الكود") >= 0)
+    else if (line.indexOf("# ✓ انتهى تنفيذ الكود") >= 0) {
+      stopHeartbeat();
       showToast("✅ انتهى تنفيذ الكود على الروبوت", "ok", 5000);
-    else if (line.indexOf("# ⏹ أُلغي تنفيذ") >= 0)
+    } else if (line.indexOf("# ⏹ أُلغي تنفيذ") >= 0) {
+      stopHeartbeat();
       showToast(line.replace(/^#\s*/, ""), "", 5000);
+    }
     else if (line.indexOf("# ✓ استُلم الكود") >= 0)
       showToast("📥 " + line.replace(/^#\s*/, ""), "ok", 3500);
     if (line.indexOf("# برنامج السباق الذكي") >= 0) allowFill = true;   // برنامج جديد مطبوع
+    if (line.indexOf("# HUB_VERSION") === 0) hubVersion = line.replace("# HUB_VERSION", "").trim();
+    // عيّنات # T تُحفظ بطابع زمني حقيقي (CSV) بدل الزمن التقديري
+    const tel = line.match(/^# T d=(-?[\d.]+) h=(-?[\d.]+) L=([\d.]+) R=([\d.]+)/);
+    if (tel) {
+      telemetry.push({
+        t: ((performance.now() - bootTime) / 1000).toFixed(1),
+        d: tel[1], h: tel[2], L: tel[3], R: tel[4]
+      });
+      if (telemetry.length > 20000) telemetry.shift();
+    }
 
     // عدّاد الأوامر المسجّلة: أسطر الحركة فقط (لا تُحسب أسطر تهيئة البرنامج المطبوعة)
     if (/^(robot\.|find_line\(|align_on_line\(|follow_line\()/.test(line)
@@ -422,12 +452,36 @@ function appendLog(text) {
   if (!shown) { countEl.textContent = recorded; return; }
 
   countEl.textContent = recorded;
-  logEl.textContent += shown;
-  logEl.scrollTop = logEl.scrollHeight;
+  appendToLog(shown);
   if (shown.includes("APP_READY")) setStatus("متصل — برنامج التدريب يعمل والروبوت جاهز ✅ حرّك الروبوت ثم اضغط", "on");
   // نسخة روبوت قديمة بلا علامات: جهّز اللوحة من السجل مباشرة
   if (!sawMarkers && /# --- نهاية المسار ---|from pybricks/.test(shown)) fillFromLog();
   updateDiag();
+}
+
+// إلحاق سطر واحد (أو أكثر) بلا إعادة بناء نص السجل كاملًا، مع سقف للأسطر.
+function appendToLog(text) {
+  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+  logEl.appendChild(document.createTextNode(text));
+  logLines += (text.match(/\n/g) || []).length;
+  if (logLines > LOG_MAX_LINES) trimLog();
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+function trimLog() {
+  // نحذف أقدم ربع من الأسطر ونضع علامة واضحة على القصّ
+  const keep = Math.floor(LOG_MAX_LINES * 0.75);
+  const nodes = [...logEl.childNodes];
+  let total = logLines;
+  while (nodes.length && total > keep) {
+    const node = nodes.shift();
+    total -= (node.textContent.match(/\n/g) || []).length;
+    logTrimmed += (node.textContent.match(/\n/g) || []).length;
+    node.remove();
+  }
+  logLines = total;
+  const note = document.createTextNode("# … قُصّت " + logTrimmed + " سطرًا قديمًا من السجل (الحد " + LOG_MAX_LINES + ") …\n");
+  logEl.insertBefore(note, logEl.firstChild);
+  logLines += 1;
 }
 
 // ===== الاتصال =====
@@ -449,15 +503,14 @@ async function connect(anyDevice) {
       const service = await server.getPrimaryService(PYBRICKS_SERVICE);
       cmdChar = await service.getCharacteristic(PYBRICKS_CMD_EVENT);
       await cmdChar.startNotifications();
-      cmdChar.addEventListener("characteristicvaluechanged", onPybricksEvent);
+      attachPybricksEvents(cmdChar);
       mode = "pybricks";
     } catch (e) { // وضع بديل: Nordic UART
       const service = await server.getPrimaryService(NUS_SERVICE);
       nusRx = await service.getCharacteristic(NUS_RX);
       const tx = await service.getCharacteristic(NUS_TX);
       await tx.startNotifications();
-      tx.addEventListener("characteristicvaluechanged", ev =>
-        appendLog(decoder.decode(ev.target.value, { stream: true })));
+      attachNusEvents(tx);
       mode = "nus";
     }
     setConnectedUI(true);
@@ -465,6 +518,8 @@ async function connect(anyDevice) {
       ? " — شغّل برنامج التدريب من زر الـ Hub نفسه"
       : " — اضغط «تشغيل برنامج التدريب» أو شغّله من الـ Hub"), "on");
     showToast("✅ تم الاتصال بالروبوت (" + (mode === "nus" ? "NUS" : "Pybricks BLE") + ")", "ok");
+    $("btnReconnect").hidden = true;
+    requestWakeLock();
     updateDiag();
   } catch (e) {
     setStatus("فشل الاتصال: " + e.message, "");
@@ -475,12 +530,34 @@ async function connect(anyDevice) {
 }
 
 function onDisconnected() {
+  stopHeartbeat(true);
+  releaseWakeLock();
   mode = null; cmdChar = null; nusRx = null;
   rcStop(true); // لا نرسل x بعد قطع الاتصال
   setConnectedUI(false);
   setStatus("انقطع الاتصال بالروبوت", "");
-  showToast("⚠ انقطع الاتصال بالروبوت", "err");
+  $("btnReconnect").hidden = false;
+  showToast("⚠ انقطع الاتصال بالروبوت — اضغط «🔁 إعادة الاتصال»", "err", 6000);
   updateDiag();
+}
+
+// ربط مستمع الإشعارات مرة واحدة لكل كائن: إعادة الاتصال قد تُعيد نفس
+// الكائن، ولو أضفنا المستمع ثانية لتكرّر كل سطر في السجل مرتين.
+let boundCmdChar = null, boundNusTx = null;
+function attachPybricksEvents(char) {
+  if (boundCmdChar === char) return;
+  if (boundCmdChar) boundCmdChar.removeEventListener("characteristicvaluechanged", onPybricksEvent);
+  boundCmdChar = char;
+  char.addEventListener("characteristicvaluechanged", onPybricksEvent);
+}
+function attachNusEvents(tx) {
+  if (boundNusTx === tx) return;
+  if (boundNusTx) boundNusTx.removeEventListener("characteristicvaluechanged", onNusEvent);
+  boundNusTx = tx;
+  tx.addEventListener("characteristicvaluechanged", onNusEvent);
+}
+function onNusEvent(ev) {
+  appendLog(decoder.decode(ev.target.value, { stream: true }));
 }
 
 function onPybricksEvent(ev) {
@@ -498,8 +575,13 @@ function onPybricksEvent(ev) {
 }
 
 // ===== الإرسال (متسلسل حتى لا تتداخل كتابات GATT) =====
-function queueWrite(bytes) {
-  writeChain = writeChain.then(async () => {
+// كانت الكتابة تبتلع كل خطأ وتُكمل كأن الإرسال نجح، فيظهر «أُرسل الكود»
+// ولو لم يصل شيء. الآن:
+//   writeRaw()  → يرفض (reject) عند الفشل، لمن يريد معرفة النتيجة
+//   sendCmd()   → للأوامر السريعة من الواجهة (لا يرمي استثناءً غير معالج)
+//   sendBytes() → للكود: يعيد المحاولة، ويُعيد true/false
+function writeRaw(bytes) {
+  const attempt = writeChain.then(async () => {
     if (mode === "pybricks" && cmdChar) {
       const payload = new Uint8Array(bytes.length + 1);
       payload[0] = 6; // WRITE_STDIN
@@ -507,11 +589,30 @@ function queueWrite(bytes) {
       await cmdChar.writeValueWithResponse(payload);
     } else if (mode === "nus" && nusRx) {
       await nusRx.writeValueWithResponse(new Uint8Array(bytes));
+    } else {
+      throw new Error("لا يوجد اتصال نشط");
     }
-  }).catch(e => showToast("✗ خطأ إرسال: " + e.message, "err"));
-  return writeChain;
+  });
+  // السلسلة تُكمل حتى لو فشلت كتابة واحدة، والمستدعي يرى الخطأ
+  writeChain = attempt.catch(() => {});
+  return attempt;
 }
-const sendCmd = ch => queueWrite([...new TextEncoder().encode(ch)]);
+const sendCmd = ch => writeRaw([...new TextEncoder().encode(ch)])
+  .catch(e => showToast("✗ خطأ إرسال: " + e.message, "err"));
+// إرسال بايتات مع إعادة محاولة (تنفع مع BUSY من مخزن stdin على الـ Hub)
+async function sendBytes(bytes, tries) {
+  let attempt = 0;
+  for (;;) {
+    try {
+      await writeRaw(bytes);
+      return true;
+    } catch (e) {
+      attempt += 1;
+      if (attempt >= (tries || 3)) return false;
+      await new Promise(r => setTimeout(r, 60 * attempt));
+    }
+  }
+}
 const sendHubCommand = code => { // أوامر Pybricks المباشرة (بدون 0x06)
   writeChain = writeChain.then(() => cmdChar && cmdChar.writeValueWithResponse(new Uint8Array([code])))
     .catch(e => showToast("✗ خطأ: " + e.message, "err"));
@@ -565,7 +666,7 @@ function rcStop(quiet) {
   document.querySelectorAll(".rc.active").forEach(b => b.classList.remove("active"));
   if (rcActive === null) return;
   rcActive = null;
-  sendCmd(RC.stop);
+  if (mode) sendCmd(RC.stop);   // لا نرسل بعد قطع الاتصال (لا معنى ولن يصل)
   if (!quiet) showToast("⏹ توقف الحركة عن بعد");
 }
 const RC_HOLD = [
@@ -583,6 +684,12 @@ RC_HOLD.forEach(([id, ch]) => {
   btn.addEventListener("lostpointercapture", () => rcStop());
   btn.addEventListener("contextmenu", e => e.preventDefault());
   btn.addEventListener("click", e => e.preventDefault()); // منع التفعيل بلوحة/اللمس المزدوج
+  // من يستخدم لوحة المفاتيح فقط: Enter على الزر المركّز = استمرار بالتحرك،
+  // ورفعه = توقف. (مفتاح المسافة محجوز للإيقاف العام في أي مكان.)
+  btn.addEventListener("keydown", e => {
+    if (e.code === "Enter") { e.preventDefault(); rcStart(ch, btn); }
+  });
+  btn.addEventListener("keyup", e => { if (e.code === "Enter") rcStop(); });
 });
 $("rcStop").addEventListener("click", () => rcStop());
 $("rcStop").addEventListener("pointerdown", e => { e.preventDefault(); $("rcStop").classList.add("active"); rcStop(); });
@@ -637,11 +744,15 @@ document.addEventListener("keyup", e => {
 });
 // أمان: نوقف كل شيء إذا خرجت النافذة أو اختفى الاتصال
 window.addEventListener("blur", () => rcStop(true));
-document.addEventListener("visibilitychange", () => { if (document.hidden) rcStop(true); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) rcStop(true);
+  else requestWakeLock();     // المتصفح يحرّر القفل عند إخفاء الصفحة
+});
 // ===== ربط الواجهة =====
 $("btnConnect").onclick = () => connect(false);
 $("btnConnectAny").onclick = () => connect(true);
 $("btnDisconnect").onclick = () => device && device.gatt.connected && device.gatt.disconnect();
+$("btnReconnect").onclick = () => reconnect();
 $("btnStart").onclick = () => { sendHubCommand(CMD_START_PROGRAM); showToast("▶ أُرسل أمر تشغيل برنامج التدريب — انتظر APP_READY من الروبوت", "", 3500); updateDiag(); };
 $("btnStop").onclick = () => { rcStop(true); sendHubCommand(CMD_STOP_PROGRAM); showToast("⏹ أُرسل أمر إيقاف البرنامج"); updateDiag(); };
 
@@ -709,12 +820,22 @@ function progSide(v) {
 }
 function programToRobotLines(text) {
   const lines = [], skipped = [];
-  let inRun = false, sawRun = false;
+  let inRun = false, sawRun = false, inDef = false;
   for (const raw of String(text).split("\n")) {
     const code = raw.split("#")[0];
     const t = code.trim();
     if (!t) continue;
-    if (/^def\s+run\s*\(/.test(t)) { inRun = true; sawRun = true; continue; }
+    // جسم أي دالة أخرى (find_line / align_on_line / follow_line / run_2 …)
+    // ليس أوامر مسار: كنا نعدّه «متجاهلًا» فيظهر «تجاهلت 9 أسطر» كإنذار
+    // كاذب يُقلق المستخدم. نتخطّاه بصمت حتى نخرج من الدالة.
+    if (!/^\s/.test(code)) inDef = false;
+    if (/^def\s+/.test(t)) {
+      const isRun = /^def\s+run\s*\(/.test(t);
+      inDef = !isRun;
+      if (isRun) { inRun = true; sawRun = true; }
+      continue;
+    }
+    if (inDef) continue;                                // داخل دالة مساعدة
     if (inRun && !/^\s/.test(code)) inRun = false;      // خرجنا من دالة run
     if (sawRun && !inRun) continue;                     // نتجاهل بقية الملف
     const push = (cmd, value) => {
@@ -738,6 +859,7 @@ function programToRobotLines(text) {
     } else if ((m = t.match(/^follow_line\(\s*([^)]*)\)$/))) {
       const a = progArgs(m[1]);
       if (!a.length || !Number.isFinite(progNum(a[0]))) { skipped.push(t); continue; }
+      // الإشارة محفوظة: المسافة السالبة = متابعة الخط أثناء الرجوع
       lines.push("L " + Math.round(progNum(a[0])) + " " + progSide(a[1]));
     } else if (/^(robot\.|find_line|align_on_line|follow_line)/.test(t)
                && !/^robot\.(reset|use_gyro|settings)\(/.test(t)) {
@@ -747,10 +869,94 @@ function programToRobotLines(text) {
   return { lines, skipped };
 }
 
+// عتاة الخط المكتوبة في اللوحة (LINE_THRESHOLD = 49) — تُرسل للـ Hub بـ H
+// حتى ينفّذ نفس عتبة الكود المعروض بدل عتبة الـ Hub المحفوظة.
+function programThreshold(text) {
+  const m = String(text).match(/^\s*LINE_THRESHOLD\s*=\s*(\d+)/m);
+  if (!m) return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) ? v : null;
+}
+
 function setSendBusy(on) {
   $("btnSendRun").disabled = on || !mode;
   $("btnSendOnly").disabled = on || !mode;
   $("btnSendRun").textContent = on ? "⏳ جارٍ إرسال الكود…" : "📤 إرسال الكود وتشغيله على الروبوت";
+}
+
+// صندوق بريد لآخر أسطر الـ Hub — ننتظر به التأكيدات بلا الاعتماد على نص السجل
+const inbox = [];      // آخر أسطر الـ Hub: {seq, line}
+let inboxSeq = 0;
+function pushInbox(line) {
+  inbox.push({ seq: inboxSeq++, line });
+  if (inbox.length > 400) inbox.splice(0, 100);     // حلقة محدودة الذاكرة
+}
+function waitForLine(re, timeoutMs) {
+  const from = inboxSeq;
+  return new Promise(resolve => {
+    const started = performance.now();
+    const tick = () => {
+      for (const item of inbox) {
+        if (item.seq < from) continue;
+        const m = String(item.line).match(re);
+        if (m) return resolve(m);
+      }
+      if (performance.now() - started > timeoutMs) return resolve(null);
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+}
+
+// نبضة حياة أثناء تنفيذ الكود: الـ Hub يوقف الروبوت خلال 2.5 ثانية إن توقفت
+// (انقطاع بلوتوث، إغلاق التبويب، تعليق المتصفح) — انظر HEARTBEAT_MS في as3_app.py
+let beatTimer = null;
+function startHeartbeat() {
+  stopHeartbeat(true);
+  sendCmd("p");
+  beatTimer = setInterval(() => sendCmd("p"), 1000);
+}
+function stopHeartbeat(quiet) {
+  if (beatTimer) { clearInterval(beatTimer); beatTimer = null; }
+  if (!quiet && mode) sendCmd("q");
+}
+
+// إرسال الكود: B + حزم N (بايتان طول + بيانات) + E + H + G
+// كان الإرسال حرفًا حرفًا (~900 كتابة GATT لبرنامج من 100 أمر ≈ 15–25 ثانية)،
+// والآن ~15–30 حزمة في أقل من ثانية. الـ Hub يجمّع الحزم بنفسه.
+const FRAME_MAX = 90;            // أقل من حدّ خاصية BLE (100 بايت)
+
+// بناء حزم N من نص الأوامر: [N][len lo][len hi][حمولة]
+// دالة نقية (بلا بلوتوث) حتى تُختبر بسهولة — انظر tests/web.test.mjs
+function buildFrames(text, size) {
+  const bytes = new TextEncoder().encode(text);
+  const max = size || FRAME_MAX;
+  const frames = [];
+  for (let i = 0; i < bytes.length; i += max) {
+    const chunk = bytes.subarray(i, i + max);
+    const frame = new Uint8Array(chunk.length + 3);
+    frame[0] = "N".charCodeAt(0);
+    frame[1] = chunk.length & 0xFF;         // الطول little-endian
+    frame[2] = (chunk.length >> 8) & 0xFF;
+    frame.set(chunk, 3);
+    frames.push(frame);
+  }
+  return frames;
+}
+
+async function sendBulkProgram(lines, threshold) {
+  const text = lines.map(l => l + "\n").join("");
+  if (!await sendBytes(new TextEncoder().encode("B"))) return "تعذّر بدء الإرسال";
+  const frames = buildFrames(text);
+  for (let i = 0; i < frames.length; i++) {
+    if (!await sendBytes(frames[i])) return "انقطع الإرسال عند الحزمة " + (i + 1) + " من " + frames.length;
+  }
+  if (!await sendBytes(new TextEncoder().encode("E"))) return "تعذّر إغلاق الإرسال";
+  // العتبة قبل التنفيذ: نفس الرقم المكتوب في اللوحة
+  if (threshold !== null) {
+    if (!await sendBytes(new TextEncoder().encode("H " + threshold + "\n"))) return "تعذّر إرسال عتاة الخط";
+  }
+  return null;
 }
 
 async function sendProgramToRobot(runIt) {
@@ -773,18 +979,35 @@ async function sendProgramToRobot(runIt) {
   sendingProgram = true;
   rcStop(true);
   setSendBusy(true);
+  const threshold = programThreshold(p);
   try {
-    await sendCmd("K");                                  // بداية استلام الكود على الـ Hub
-    for (const line of lines) {
-      await sendCmd(line + "\n");
-      await new Promise(r => setTimeout(r, 20));         // مهلة صغيرة حتى يقرأ الـ Hub كل سطر
+    const failure = await sendBulkProgram(lines, threshold);
+    if (failure) {
+      showToast("✗ فشل إرسال الكود: " + failure + " — لم يتغيّر الكود على الروبوت", "err", 8000);
+      return;
     }
-    await sendCmd("E");                                  // انتهى الاستلام
+    // لا نعلن النجاح إلا بعد تأكيد الـ Hub نفسه
+    const ack = await waitForLine(/# ✓ استُلم الكود: (\d+)/, 3000);
+    if (!ack) {
+      showToast("⚠ لم يصل تأكيد الـ Hub — تحقّق أن برنامج التدريب يعمل (APP_READY)"
+        + " وأن as3_app.py محدَّث (v4 يحتاج الحزم N)", "err", 9000);
+      return;
+    }
+    const got = Number(ack[1]);
+    if (got !== lines.length) {
+      showToast("⚠ وصل " + got + " من " + lines.length + " أمرًا — أعد الإرسال أو راجع السجل", "err", 8000);
+      return;
+    }
     if (runIt) {
       await new Promise(r => setTimeout(r, 80));
-      await sendCmd("G");                                // نفّذ الكود المستلم
+      if (!await sendBytes(new TextEncoder().encode("G"))) {
+        showToast("✗ تعذّر بدء التنفيذ", "err", 6000);
+        return;
+      }
+      startHeartbeat();                    // يراقبه الـ Hub ويوقف الروبوت إن انقطع
     }
-    showToast("📤 أُرسل الكود إلى الروبوت (" + lines.length + " أمر"
+    showToast("📤 أُرسل الكود وتأكّد الـ Hub (" + lines.length + " أمر"
+      + (threshold !== null ? "، عتاة الخط " + threshold : "")
       + (skipped.length ? " — تجاهلت " + skipped.length + " سطرًا" : "") + ")"
       + (runIt ? " — التنفيذ يبدأ الآن" : " — اضغط «📤 إرسال الكود وتشغيله» للتنفيذ"),
       "ok", 5000);
@@ -793,20 +1016,19 @@ async function sendProgramToRobot(runIt) {
     setSendBusy(false);
   }
 }
-// تحويل سطور القياس # T إلى CSV (زمن تقديري 0.1 ثانية بين العينات)
+// تحويل سطور القياس # T إلى CSV.
+// الزمن حقيقي (يُسجَّل لحظة وصول السطر) بدل تقدير 0.1 ثانية لكل عينة:
+// البثّ يتوقف عند السكون، فالتقدير كان يُزيح المحور الزمني.
 function telemetryCsv() {
-  const re = /^# T d=(-?[\d.]+) h=(-?[\d.]+) L=([\d.]+) R=([\d.]+)/;
   const rows = [["t_s", "d_mm", "h_deg", "L_reflect", "R_reflect"]];
-  for (const line of logEl.textContent.split("\n")) {
-    const m = line.match(re);
-    if (m) rows.push([((rows.length - 1) * 0.1).toFixed(1), m[1], m[2], m[3], m[4]]);
-  }
+  for (const s of telemetry) rows.push([s.t, s.d, s.h, s.L, s.R]);
   return rows.map(r => r.join(",")).join("\n") + "\n";
 }
 
 $("btnCopyLog").onclick = () => copyText(logEl.textContent, "تم نسخ السجل كاملًا ✅");
 $("btnDownloadLog").onclick = () => {
   if (!logEl.textContent.trim()) { showToast("✗ السجل فارغ", "err"); return; }
+  if (logTrimmed) showToast("ℹ السجل مقصوص (" + logTrimmed + " سطرًا قديمًا) — الملف يحتوي المعروض فقط", "", 6000);
   downloadText("robot_log_" + fileStamp() + ".txt", logEl.textContent);
 };
 $("btnDownloadCsv").onclick = () => {
@@ -828,6 +1050,7 @@ $("btnSendRun").onclick = () => sendProgramToRobot(true);
 $("btnSendOnly").onclick = () => sendProgramToRobot(false);
 $("btnStopRun").onclick = () => {
   if (!mode) { showToast("✗ غير متصل بالروبوت", "err"); return; }
+  stopHeartbeat();
   sendCmd("x");   // x أثناء التنفيذ = إيقاف فوري في as3_app.py
   showToast("⏹ أُرسل أمر إيقاف التنفيذ");
 };
@@ -838,7 +1061,60 @@ $("btnClearProgram").onclick = () => {
   $("progOut").value = ""; $("progBadge").hidden = true; $("progNote").hidden = true;
   showToast("تم تفريغ لوحة البرنامج");
 };
-$("btnClearLog").onclick = () => { logEl.textContent = ""; recorded = 0; countEl.textContent = 0; updateDiag(); };
+$("btnClearLog").onclick = () => {
+  logEl.textContent = ""; logLines = 0; logTrimmed = 0;
+  telemetry.length = 0;
+  recorded = 0; countEl.textContent = 0;
+  updateDiag();
+};
+
+// ===== مزامنة الشاشة (Wake Lock) =====
+// نوم الشاشة يوقف مؤقتات الصفحة، فتتوقف نبضات التحكم ويتبلّط الروبوت.
+// نطلب عدم النوم ما دام الاتصال قائمًا، ونعيد الطلب عند رجوع الصفحة.
+let wakeLock = null;
+async function requestWakeLock() {
+  if (!("wakeLock" in navigator) || !mode) return;
+  try {
+    wakeLock = await navigator.wakeLock.request("screen");
+    wakeLock.addEventListener("release", () => { wakeLock = null; });
+  } catch (_) { /* غير مدعوم أو رفضه المتصفح — لا يضر */ }
+}
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+}
+
+// ===== إعادة الاتصال السريعة (بلا نافذة اختيار) =====
+async function reconnect() {
+  if (!device) { connect(false); return; }
+  try {
+    setStatus("جارِ إعادة الاتصال…", "busy");
+    // إعادة فتح الخدمة على نفس الجهاز: أسرع من نافذة الاختيار
+    const server = await device.gatt.connect();
+    try {
+      const service = await server.getPrimaryService(PYBRICKS_SERVICE);
+      cmdChar = await service.getCharacteristic(PYBRICKS_CMD_EVENT);
+      await cmdChar.startNotifications();
+      attachPybricksEvents(cmdChar);
+      mode = "pybricks";
+    } catch (e) {
+      const service = await server.getPrimaryService(NUS_SERVICE);
+      nusRx = await service.getCharacteristic(NUS_RX);
+      const tx = await service.getCharacteristic(NUS_TX);
+      await tx.startNotifications();
+      attachNusEvents(tx);
+      mode = "nus";
+    }
+    setConnectedUI(true);
+    $("btnReconnect").hidden = true;
+    setStatus("أُعيد الاتصال بـ " + (device.name || "Hub"), "on");
+    showToast("✅ أُعيد الاتصال", "ok");
+    updateDiag();
+    requestWakeLock();
+  } catch (e) {
+    setStatus("فشل إعادة الاتصال: " + e.message, "");
+    showToast("✗ فشل إعادة الاتصال — أعد الاختيار بزر «اتصال بالبلوتوث»", "err", 6000);
+  }
+}
 
 setConnectedUI(false);
 
