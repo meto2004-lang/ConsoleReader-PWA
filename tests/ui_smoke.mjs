@@ -112,6 +112,17 @@ check("لا يُعلن نجاحًا كاذبًا", !/تأكّد الـ Hub/.test
 // إعادة الحالة كما كانت كي لا تتأثر التحقّقات التالية
 w.eval("stopHeartbeat(true); sendingProgram = false; mode = null; cmdChar = null; setHubState(null);");
 
+// إرسال برنامج بأرقام عربية من المحرّر: يجب أن يصل ويعمل
+await fakeHub({ ackDuringSend: true, answerPing: true });
+w.__written.length = 0;
+await w.eval('sendProgramToRobot(true, "robot.turn(٩٠)\\nrobot.straight(٣٠٠)\\n")');
+const arabicToast = d.getElementById("toast").textContent;
+check("أرقام عربية تُرسل كأرقام لاتينية", /أُرسل الكود وتأكّد الـ Hub \(2 أمر/.test(arabicToast),
+  arabicToast.slice(0, 100));
+check("الحمولة المرسلة تحتوي 90 لا ٩٠", w.__written.join("").includes("T 90"),
+  w.__written.join("").slice(0, 40));
+w.eval("stopHeartbeat(true); sendingProgram = false; mode = null; cmdChar = null; setHubState(null);");
+
 // شارة استجابة الـ Hub موجودة وتبدأ بحالة «لم يُفحص»
 check("شارة الـ Hub موجودة", d.getElementById("hubState").textContent.includes("—"),
   d.getElementById("hubState").textContent);

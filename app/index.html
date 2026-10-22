@@ -969,55 +969,129 @@ function progSide(v) {
   const s = String(v || "L").replace(/["']/g, "").trim().toUpperCase();
   return s.charAt(0) === "R" ? "R" : "L";
 }
-function programToRobotLines(text) {
-  const lines = [], skipped = [];
-  let inRun = false, sawRun = false, inDef = false;
-  for (const raw of String(text).split("\n")) {
-    const code = raw.split("#")[0];
-    const t = code.trim();
-    if (!t) continue;
-    // جسم أي دالة أخرى (find_line / align_on_line / follow_line / run_2 …)
-    // ليس أوامر مسار: كنا نعدّه «متجاهلًا» فيظهر «تجاهلت 9 أسطر» كإنذار
-    // كاذب يُقلق المستخدم. نتخطّاه بصمت حتى نخرج من الدالة.
-    if (!/^\s/.test(code)) inDef = false;
-    if (/^def\s+/.test(t)) {
-      const isRun = /^def\s+run\s*\(/.test(t);
-      inDef = !isRun;
-      if (isRun) { inRun = true; sawRun = true; }
-      continue;
-    }
-    if (inDef) continue;                                // داخل دالة مساعدة
-    if (inRun && !/^\s/.test(code)) inRun = false;      // خرجنا من دالة run
-    if (sawRun && !inRun) continue;                     // نتجاهل بقية الملف
-    const push = (cmd, value) => {
-      if (!Number.isFinite(value)) { skipped.push(t); return; }
-      lines.push(cmd + " " + Math.round(value));
-    };
-    let m;
-    if ((m = t.match(/^robot\.turn\(\s*([^)]*)\)$/))) {
-      push("T", progNum(m[1]));
-    } else if ((m = t.match(/^robot\.straight\(\s*([^)]*)\)$/))) {
-      push("S", progNum(m[1]));
-    } else if ((m = t.match(/^find_line\(\s*([^)]*)\)$/))) {
-      const a = progArgs(m[1]);
-      const dir = a.length ? (progNum(a[0]) < 0 ? -1 : 1) : 1;
-      const dist = a.length > 1 ? progNum(a[1]) : 250;
-      if (!Number.isFinite(dist)) { skipped.push(t); continue; }
-      lines.push("F " + dir + " " + Math.round(dist));
-    } else if ((m = t.match(/^align_on_line\(\s*([^)]*)\)$/))) {
-      const a = progArgs(m[1]);
-      push("A", a.length ? progNum(a[0]) : 25);
-    } else if ((m = t.match(/^follow_line\(\s*([^)]*)\)$/))) {
-      const a = progArgs(m[1]);
-      if (!a.length || !Number.isFinite(progNum(a[0]))) { skipped.push(t); continue; }
+// ===== تحويل البرنامج إلى أوامر الـ Hub =====
+// أرقام عربية/فارسية ← لاتينية: لوحة المفاتيح العربية على الجوال تُنتج «٩٠»
+// بدل «90»، وكان ذلك يجعل البرنامج كله «غير قابل للإرسال» بلا سبب واضح.
+const EAST_DIGITS = /[\u0660-\u0669\u06F0-\u06F9]/g;
+function normalizeDigits(text) {
+  return String(text == null ? "" : text)
+    .replace(EAST_DIGITS, ch => {
+      const c = ch.charCodeAt(0);
+      return String(c >= 0x06F0 ? c - 0x06F0 : c - 0x0660);
+    })
+    .replace(/\u066B/g, ".")      // الفاصلة العشرية العربية
+    .replace(/\u066C/g, " ");     // فاصل الآلاف
+}
+
+// يحلّل سطرًا واحدًا ويضيف الأمر إلى out (أو يُسجّل السطر في skipped).
+// يعيد true إذا بدا السطر أمرًا معروفًا — حتى لو رُفضت قيمته.
+function parseStatement(t, out, skipped) {
+  let m;
+  if ((m = t.match(/^robot\.turn\(\s*([^)]*)\)$/))) {
+    const v = progNum(m[1]);
+    if (Number.isFinite(v)) out.push("T " + Math.round(v)); else skipped.push(t);
+    return true;
+  }
+  if ((m = t.match(/^robot\.straight\(\s*([^)]*)\)$/))) {
+    const v = progNum(m[1]);
+    if (Number.isFinite(v)) out.push("S " + Math.round(v)); else skipped.push(t);
+    return true;
+  }
+  if ((m = t.match(/^find_line\(\s*([^)]*)\)$/))) {
+    const a = progArgs(m[1]);
+    const dir = a.length ? (progNum(a[0]) < 0 ? -1 : 1) : 1;
+    const dist = a.length > 1 ? progNum(a[1]) : 250;
+    if (Number.isFinite(dist)) out.push("F " + dir + " " + Math.round(dist));
+    else skipped.push(t);
+    return true;
+  }
+  if ((m = t.match(/^align_on_line\(\s*([^)]*)\)$/))) {
+    const a = progArgs(m[1]);
+    const speed = a.length ? progNum(a[0]) : 25;
+    if (Number.isFinite(speed)) out.push("A " + Math.round(speed));
+    else skipped.push(t);
+    return true;
+  }
+  if ((m = t.match(/^follow_line\(\s*([^)]*)\)$/))) {
+    const a = progArgs(m[1]);
+    if (a.length && Number.isFinite(progNum(a[0]))) {
       // الإشارة محفوظة: المسافة السالبة = متابعة الخط أثناء الرجوع
-      lines.push("L " + Math.round(progNum(a[0])) + " " + progSide(a[1]));
-    } else if (/^(robot\.|find_line|align_on_line|follow_line)/.test(t)
-               && !/^robot\.(reset|use_gyro|settings)\(/.test(t)) {
-      skipped.push(t);                                  // أمر غير مدعوم (robot.stop مثلًا)
+      out.push("L " + Math.round(progNum(a[0])) + " " + progSide(a[1]));
+    } else {
+      skipped.push(t);
+    }
+    return true;
+  }
+  // سطر يبدأ كأمر معروف لكنه غير مكتمل (قوس ناقص…) أو أمر غير مدعوم
+  if (/^(robot\.|find_line\s*\(|align_on_line\s*\(|follow_line\s*\()/.test(t)
+      && !/^robot\.(reset|use_gyro|settings)\(/.test(t)) {
+    skipped.push(t);
+    return true;
+  }
+  return false;
+}
+
+// يمسح البرنامج سطرًا سطرًا:
+//   strict = true  → أوامر دالة run() فقط (السلوك الأصلي)
+//   strict = false → أي أمر خارج أجسام الدوال المساعدة (خطة بديلة عند فشل الأولى)
+function scanProgram(src, strict) {
+  const lines = [], skipped = [], seen = [];
+  let inRun = false, sawRun = false, helperIndent = null;
+  for (const raw of src.split("\n")) {
+    const code = raw.split("#")[0];
+    if (!code.trim()) continue;
+    const indent = code.length - code.replace(/^\s+/, "").length;
+    // جسم دالة مساعدة (find_line / align_on_line / follow_line): ليست أوامر مسار
+    if (helperIndent !== null) {
+      if (indent > helperIndent) continue;
+      helperIndent = null;
+    }
+    // أوامر متعددة في سطر واحد: robot.turn(90); robot.straight(200)
+    for (const piece of code.split(";")) {
+      const t = piece.trim();
+      if (!t) continue;
+      const defM = /^def\s+([A-Za-z_]\w*)\s*\(/.exec(t);
+      if (defM) {
+        const isRun = defM[1] === "run";
+        inRun = isRun;
+        if (isRun) sawRun = true; else helperIndent = indent;
+        continue;
+      }
+      if (strict) {
+        if (inRun && indent === 0) inRun = false;   // خرجنا من run()
+        if (sawRun && !inRun) continue;             // تعريفات واستدعاءات خارج المسار
+      }
+      const before = lines.length;
+      parseStatement(t, lines, skipped);
+      if (strict && lines.length === before
+          && /^(robot|find_line|align_on_line|follow_line)/.test(t)) {
+        seen.push(t);
+      }
     }
   }
-  return { lines, skipped };
+  return { lines, skipped, seen };
+}
+
+function programToRobotLines(text) {
+  const raw = String(text == null ? "" : text);
+  const src = normalizeDigits(raw);
+  const converted = src !== raw;          // هل كانت الأرقام عربية؟
+  const strict = scanProgram(src, true);
+  if (strict.lines.length) {
+    return { lines: strict.lines, skipped: strict.skipped, digitsConverted: converted };
+  }
+  // خطة بديلة: برنامج بلا run() أو run() فقد مسافاته البادئة (نسخ ولصق من محادثة)
+  const lenient = scanProgram(src, false);
+  if (lenient.lines.length) {
+    return { lines: lenient.lines, skipped: lenient.skipped, digitsConverted: converted };
+  }
+  return {
+    lines: [],
+    skipped: lenient.skipped.length ? lenient.skipped : strict.skipped,
+    seen: lenient.seen,
+    loose: true,
+    digitsConverted: converted,
+  };
 }
 
 // عتاة الخط المكتوبة في اللوحة (LINE_THRESHOLD = 49) — تُرسل للـ Hub بـ H
@@ -1166,11 +1240,14 @@ function checkProgram(text) {
   if (!src.trim()) { errors.push("المحرّر فارغ — لا يوجد كود"); return empty; }
   if (src.indexOf("\t") >= 0) warnings.push("يحتوي علامات جدولة (Tab) — استخدم مسافات");
   for (const issue of scanPython(src)) errors.push(issue);
-  const { lines, skipped } = programToRobotLines(src);
+  const parsed = programToRobotLines(src);
+  const { lines, skipped } = parsed;
   const threshold = programThreshold(src);
   if (!lines.length) {
-    errors.push("لا يوجد أي أمر حركة قابل للإرسال — المدعوم: robot.turn / robot.straight"
-      + " / find_line / align_on_line / follow_line");
+    errors.push("لا يوجد أي أمر حركة قابل للإرسال — " + whyNoCommands(src, parsed));
+  }
+  if (parsed.digitsConverted) {
+    notes.push("حُوّلت الأرقام العربية (٩٠) إلى لاتينية (90) تلقائيًا قبل الإرسال");
   }
   if (lines.length > PY_MAX_LINES) {
     errors.push("عدد الأوامر " + lines.length + " يتجاوز حدّ الـ Hub (" + PY_MAX_LINES + ")");
@@ -1239,6 +1316,38 @@ function pyFileName(name) {
 const escHtml = str => String(str).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 // إرسال نص برنامج (المحرّر أو المكتبة) بدل لوحة البرنامج الجاهز
+// يشرح بالضبط لماذا لم نجد أوامر — بدل رسالة عامة لا تدلّ على شيء
+function whyNoCommands(text, parsed) {
+  const src = String(text == null ? "" : text);
+  const bits = [];
+  if (parsed.digitsConverted) {
+    bits.push("حُوّلت الأرقام العربية إلى لاتينية تلقائيًا");
+  }
+  if (parsed.skipped.length) {
+    bits.push("رأيت " + parsed.skipped.length + " سطرًا لكنها غير مدعومة: "
+      + parsed.skipped.slice(0, 3).join(" · "));
+  }
+  if (parsed.seen && parsed.seen.length) {
+    bits.push("أسطر تشبه الأوامر لكنها غير مفهومة: " + parsed.seen.slice(0, 3).join(" · "));
+  }
+  if (!parsed.skipped.length && !(parsed.seen && parsed.seen.length)) {
+    const hasRun = /^\s*def\s+run\s*\(/m.test(src);
+    const hasCmd = /(robot\.turn|robot\.straight|find_line|align_on_line|follow_line)\s*\(/.test(src);
+    if (!hasCmd) {
+      bits.push("لا يوجد أي سطر فيه robot.turn / robot.straight / find_line /"
+        + " align_on_line / follow_line — اكتبها كل واحدة في سطر مستقل");
+    } else if (hasRun) {
+      bits.push("الأوامر موجودة لكن خارج دالة run() أو في جسم دالة مساعدة — ضعها بمسافة بادئة داخل run()");
+    } else if (/^\s*def\s+[A-Za-z_]\w*\s*\(/m.test(src)) {
+      bits.push("الأوامر مكتوبة داخل دالة (وليست دالة run) — انقلها إلى def run() أو اكتبها"
+        + " في أعلى الملف بلا مسافة بادئة");
+    } else {
+      bits.push("لم أستطع قراءة الأوامر — تأكد أن كل أمر في سطر مستقل مثل robot.turn(90)");
+    }
+  }
+  return bits.join(" — ");
+}
+
 async function sendProgramToRobot(runIt, text) {
   if (!mode) {
     showToast("✗ غير متصل بالروبوت — اضغط «🔵 اتصال بالبلوتوث» واختر الـ Hub أولًا", "err", 5000);
@@ -1249,10 +1358,12 @@ async function sendProgramToRobot(runIt, text) {
     showToast("✗ لا يوجد كود — اضغط «🏁 طباعة برنامج السباق الكامل» أو اكتب في المحرّر", "err", 5500);
     return;
   }
-  const { lines, skipped } = programToRobotLines(p);
+  const parsed = programToRobotLines(p);
+  const { lines, skipped } = parsed;
   if (!lines.length) {
-    showToast("✗ لم أجد أوامر قابلة للإرسال — المدعوم: robot.turn / robot.straight /"
-      + " find_line / align_on_line / follow_line", "err", 7000);
+    showToast("✗ لم أجد أوامر قابلة للإرسال — " + whyNoCommands(p, parsed)
+      + ". (المدعوم: robot.turn / robot.straight / find_line / align_on_line / follow_line)",
+      "err", 11000);
     return;
   }
   if (sendingProgram) { showToast("⏳ الإرسال جارٍ بالفعل…"); return; }

@@ -25,7 +25,8 @@ const pure = [
 const api = new Function(pure + "\nreturn {"
   + " programToRobotLines, programThreshold, buildFrames, FRAME_MAX,"
   + " checkProgram, scanPython, libNormalize, libUpsert, libRemove,"
-  + " parseHubList, pyFileName, LIB_MAX, PROG_NAME_MAX };")();
+  + " parseHubList, pyFileName, LIB_MAX, PROG_NAME_MAX,"
+  + " normalizeDigits, whyNoCommands };")();
 
 const PROGRAM = `from pybricks.hubs import PrimeHub
 robot = DriveBase(left_motor, right_motor, 62.4, 110)
@@ -209,4 +210,77 @@ test("اسم الملف آمن ويحفظ العربية", () => {
   assert.equal(api.pyFileName(""), "program.py");
   assert.ok(api.pyFileName("a b").indexOf(" ") < 0);
   assert.equal(api.PROG_NAME_MAX, 20);        // نفس PROG_NAME_MAX في as3_app.py
+});
+
+// ===== حالات كانت تُنتج «لم أجد أوامر قابلة للإرسال» =====
+test("أرقام عربية/فارسية تُحوَّل إلى لاتينية (لوحة مفاتيح عربية)", () => {
+  assert.equal(api.normalizeDigits("robot.turn(٩٠)"), "robot.turn(90)");
+  assert.equal(api.normalizeDigits("robot.turn(۹۰)"), "robot.turn(90)");
+  assert.equal(api.normalizeDigits("S ٤٠٠"), "S 400");
+  assert.equal(api.normalizeDigits("abc"), "abc");
+  const { lines } = api.programToRobotLines("robot.turn(٩٠)\nrobot.straight(٣٠٠)\n");
+  assert.deepEqual(lines, ["T 90", "S 300"]);
+});
+
+test("run() فقد مسافاته البادئة: الخطة البديلة تُنجح الإرسال", () => {
+  const src = "def run():\nrobot.turn(90)\nrobot.straight(200)\n";
+  assert.deepEqual(api.programToRobotLines(src).lines, ["T 90", "S 200"]);
+});
+
+test("أمران في سطر واحد مفصولان بفاصلة منقوطة", () => {
+  assert.deepEqual(api.programToRobotLines("robot.turn(90); robot.straight(200)\n").lines,
+    ["T 90", "S 200"]);
+});
+
+test("أجسام الدوال المساعدة لا تُنفَّذ حتى في الخطة البديلة", () => {
+  const src = [
+    "def find_line(direction=1, max_dist=250):",
+    "    robot.reset()",
+    "    robot.straight(999)",          // داخل الدالة المساعدة: ليس أمر مسار
+    "    return True",
+    "robot.straight(300)",
+    "",
+  ].join("\n");
+  assert.deepEqual(api.programToRobotLines(src).lines, ["S 300"]);
+});
+
+test("البرنامج المولَّد يبقى كما هو (لا انحدار في السلوك الأصلي)", () => {
+  const gen = [
+    "robot.use_gyro(True)",
+    "robot.settings(straight_acceleration=1200, turn_acceleration=1500)",
+    "def follow_line(dist, side=\"L\", speed=90):",
+    "    robot.drive(spd, sign * (2.5) * error)",
+    "def run():",
+    "    robot.turn(-90)",
+    "    find_line(1, 250)",
+    "    follow_line(400, \"L\")",
+    "run()",
+    "",
+  ].join("\n");
+  const r = api.programToRobotLines(gen);
+  assert.deepEqual(r.lines, ["T -90", "F 1 250", "L 400 L"]);
+  assert.deepEqual(r.skipped, []);
+});
+
+test("رسالة السبب تفرّق بين «لا أوامر» و«أوامر غير مدعومة»", () => {
+  const empty = api.programToRobotLines("print('hello')\n");
+  assert.match(api.whyNoCommands("print('hello')\n", empty), /لا يوجد أي سطر فيه/);
+
+  const unsupported = api.programToRobotLines("robot.stop()\nwait(100)\n");
+  assert.match(api.whyNoCommands("robot.stop()\nwait(100)\n", unsupported), /غير مدعومة/);
+
+  const outsideRun = api.programToRobotLines("def helper():\n    robot.turn(90)\n");
+  assert.match(api.whyNoCommands("def helper():\n    robot.turn(90)\n", outsideRun),
+    /داخل دالة|غير مدعومة/);
+});
+
+test("الفحص يعرض السبب ويذكر تحويل الأرقام", () => {
+  const bad = api.checkProgram("print('x')\n");
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors.join(" "), /لا يوجد أي أمر حركة/);
+
+  const arabic = api.checkProgram("robot.turn(٩٠)\n");
+  assert.equal(arabic.ok, true, arabic.errors.join(" | "));
+  assert.equal(arabic.lines, 1);
+  assert.match(arabic.notes.join(" "), /حُوّلت الأرقام العربية/);
 });
