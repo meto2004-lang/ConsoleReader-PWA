@@ -1047,8 +1047,10 @@ function pushInbox(line) {
   inbox.push({ seq: inboxSeq++, line });
   if (inbox.length > 400) inbox.splice(0, 100);     // حلقة محدودة الذاكرة
 }
-function waitForLine(re, timeoutMs) {
-  const from = inboxSeq;
+// fromSeq: نقطة البداية في صندوق الرسائل. تمريرها إلزامي عند انتظار ردٍّ قد
+// يصل *أثناء* الإرسال (تأكيد E يصل قبل انتهاء آخر كتابة BLE)، وإلا فاتنا.
+function waitForLine(re, timeoutMs, fromSeq) {
+  const from = (fromSeq === undefined || fromSeq === null) ? inboxSeq : fromSeq;
   return new Promise(resolve => {
     const started = performance.now();
     const tick = () => {
@@ -1258,6 +1260,9 @@ async function sendProgramToRobot(runIt, text) {
   rcStop(true);
   setSendBusy(true);
   const threshold = programThreshold(p);
+  // نلتقط موضع صندوق الرسائل *قبل* الإرسال: تأكيد الـ Hub قد يصل قبل أن
+  // تنتهي كتابة آخر حزمة، فلو انتظرناه بعده فقط لفاتنا وأعلنّا فشلًا كاذبًا.
+  const ackFrom = inboxSeq;
   try {
     const failure = await sendBulkProgram(lines, threshold);
     if (failure) {
@@ -1265,10 +1270,21 @@ async function sendProgramToRobot(runIt, text) {
       return;
     }
     // لا نعلن النجاح إلا بعد تأكيد الـ Hub نفسه
-    const ack = await waitForLine(/# ✓ استُلم الكود: (\d+)/, 3000);
+    const ack = await waitForLine(/# ✓ استُلم الكود: (\d+)/, 5000, ackFrom);
     if (!ack) {
-      showToast("⚠ لم يصل تأكيد الـ Hub — تحقّق أن برنامج التدريب يعمل (APP_READY)"
-        + " وأن as3_app.py محدَّث (v4 يحتاج الحزم N)", "err", 9000);
+      // نميّز بين «الـ Hub ميت» و«الـ Hub حيّ لكنه رفض الكود» — التشخيص هنا
+      // يوفّر على المستخدم التخمين بدل رسالة عامة.
+      const alive = await pingHub(true);
+      const last = [...inbox].reverse().map(x => x.line)
+        .find(l => /^#\s*(⚠|✗)/.test(l));
+      if (!alive) {
+        showToast("✗ الـ Hub لا يستجيب لأوامر التطبيق — نزّل as3_app.py v6 على الـ Hub"
+          + " ثم «▶ تشغيل برنامج التدريب» (النسخة الأقدم لا تعرف الحزم N)", "err", 10000);
+      } else {
+        showToast("⚠ الـ Hub يعمل لكنه لم يؤكّد استلام الكود"
+          + (last ? " — قال: " + last.replace(/^#\s*/, "") : "")
+          + " — أعد المحاولة، وإن تكرّر راجع السجل", "err", 10000);
+      }
       return;
     }
     const got = Number(ack[1]);
@@ -1588,23 +1604,25 @@ async function hubSaveProgram() {
   if (!mode) { showToast("✗ غير متصل بالروبوت", "err"); return; }
   const name = ($("hubProgName").value || $("libName").value || "").trim().slice(0, PROG_NAME_MAX);
   if (!name) { showToast("✗ اكتب اسمًا أولًا (خانة الاسم فوق)", "err", 5000); return; }
+  const from = inboxSeq;
   if (!await sendBytes(new TextEncoder().encode("W " + name + "\n"))) {
     showToast("✗ تعذّر إرسال أمر الحفظ — تحقّق من الاتصال", "err", 6000);
     return;
   }
-  const ack = await waitForLine(/# (✓ حُفظ على الهاب|✓ حُدِّث على الهاب|⚠ امتلأت ذاكرة)/, 2500);
+  const ack = await waitForLine(/# (✓ حُفظ على الهاب|✓ حُدِّث على الهاب|⚠ امتلأت ذاكرة)/, 2500, from);
   if (!ack) { showToast("⚠ لم يصل تأكيد الحفظ — راجع السجل", "err", 6000); return; }
   showToast("💾 " + ack[0].replace(/^#\s*/, ""), /امتلأت/.test(ack[0]) ? "err" : "ok", 4500);
   hubListRefresh();
 }
 async function hubRunProgram(index) {
   if (!mode) { showToast("✗ غير متصل بالروبوت", "err"); return; }
+  const from = inboxSeq;
   if (!await sendBytes(new TextEncoder().encode("J " + index + "\n"))) {
     showToast("✗ تعذّر إرسال أمر التشغيل", "err", 6000);
     return;
   }
   // لا نعلن النجاح إلا بعد أن يؤكّد الـ Hub أنه بدأ فعلًا
-  const ack = await waitForLine(/# (▶ بدء تنفيذ الكود|▶ برنامج محفوظ:|⚠ لا يوجد برنامج)/, 2500);
+  const ack = await waitForLine(/# (▶ بدء تنفيذ الكود|▶ برنامج محفوظ:|⚠ لا يوجد برنامج)/, 2500, from);
   if (!ack) {
     showToast("⚠ لم يصل تأكيد التشغيل من الـ Hub — راجع السجل (وأن as3_app.py v6 يعمل)", "err", 7000);
     return;
@@ -1615,11 +1633,12 @@ async function hubRunProgram(index) {
 }
 async function hubDeleteProgram(index) {
   if (!mode) { showToast("✗ غير متصل بالروبوت", "err"); return; }
+  const from = inboxSeq;
   if (!await sendBytes(new TextEncoder().encode("D " + index + "\n"))) {
     showToast("✗ تعذّر إرسال أمر الحذف", "err", 6000);
     return;
   }
-  const ack = await waitForLine(/# (✗ حُذف من الهاب|⚠ لا يوجد برنامج)/, 2500);
+  const ack = await waitForLine(/# (✗ حُذف من الهاب|⚠ لا يوجد برنامج)/, 2500, from);
   if (!ack) { showToast("⚠ لم يصل تأكيد الحذف — اضغط «🔄 تحديث»", "err", 6000); return; }
   showToast(ack[0].replace(/^#\s*/, ""), /⚠/.test(ack[0]) ? "err" : "ok", 4000);
   hubListRefresh();

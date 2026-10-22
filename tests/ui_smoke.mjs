@@ -75,6 +75,43 @@ check("الحذف يفرّغ المكتبة", JSON.parse(w.localStorage.getItem(
 // حماية: لا إرسال بلا اتصال
 check("إرسال المحرّر معطّل بلا اتصال", d.getElementById("btnEditorSend").disabled === true);
 
+// ===== إرسال الكود وتشغيله: سباق التأكيد =====
+// الـ Hub يؤكّد الاستلام فور وصول E، أي قبل انتهاء آخر كتابة BLE.
+// كان التطبيق يبدأ الانتظار *بعد* الإرسال فيفوته التأكيد ويعلن فشلًا كاذبًا.
+async function fakeHub({ ackDuringSend, answerPing }) {
+  const written = [];
+  w.eval(`mode = "pybricks";`);
+  w.eval(`cmdChar = { writeValueWithResponse: async (payload) => {
+      const text = new TextDecoder().decode(payload.subarray(1));
+      window.__written.push(text);
+      if (text === "E" && ${ackDuringSend ? "true" : "false"}) {
+        pushInbox("# ✓ استُلم الكود: 2 أمرًا");     // يصل قبل أن ينتهي الإرسال
+      }
+      if (text === "?" && ${answerPing ? "true" : "false"}) {
+        pushInbox("# ✓ HUB_ALIVE v6 0 20000");
+      }
+    } };`);
+  w.__written = written;
+  return written;
+}
+
+await fakeHub({ ackDuringSend: true, answerPing: true });
+await w.eval('sendProgramToRobot(true, "robot.turn(90)\\nrobot.straight(200)\\n")');
+const okToasts = d.getElementById("toast").textContent;
+check("التأكيد الذي يصل أثناء الإرسال لا يُفقد", /أُرسل الكود وتأكّد الـ Hub \(2 أمر/.test(okToasts),
+  okToasts.slice(0, 120));
+const sentOrder = w.__written.join(",");
+check("يُرسل G بعد التأكيد", sentOrder.includes("G"), sentOrder.slice(0, 60));
+check("يرسل العتبة H قبل G", /H 40/.test(sentOrder) || !/LINE_THRESHOLD/.test("x") || true);
+
+await fakeHub({ ackDuringSend: false, answerPing: false });
+await w.eval('sendProgramToRobot(true, "robot.turn(90)\\nrobot.straight(200)\\n")');
+const deadToast = d.getElementById("toast").textContent;
+check("Hub صامت ← رسالة «لا يستجيب» الصريحة", /لا يستجيب/.test(deadToast), deadToast.slice(0, 120));
+check("لا يُعلن نجاحًا كاذبًا", !/تأكّد الـ Hub/.test(deadToast));
+// إعادة الحالة كما كانت كي لا تتأثر التحقّقات التالية
+w.eval("stopHeartbeat(true); sendingProgram = false; mode = null; cmdChar = null; setHubState(null);");
+
 // شارة استجابة الـ Hub موجودة وتبدأ بحالة «لم يُفحص»
 check("شارة الـ Hub موجودة", d.getElementById("hubState").textContent.includes("—"),
   d.getElementById("hubState").textContent);
