@@ -22,7 +22,10 @@ const pure = [
   slice("const progNum", "function setSendBusy"),
   slice("const FRAME_MAX", "async function sendProgramToRobot"),
 ].join("\n");
-const api = new Function(pure + "\nreturn { programToRobotLines, programThreshold, buildFrames, FRAME_MAX };")();
+const api = new Function(pure + "\nreturn {"
+  + " programToRobotLines, programThreshold, buildFrames, FRAME_MAX,"
+  + " checkProgram, scanPython, libNormalize, libUpsert, libRemove,"
+  + " parseHubList, pyFileName, LIB_MAX, PROG_NAME_MAX };")();
 
 const PROGRAM = `from pybricks.hubs import PrimeHub
 robot = DriveBase(left_motor, right_motor, 62.4, 110)
@@ -97,4 +100,113 @@ test("سطر القياس يخصّ حسّاسًا واحدًا على C (لا L/
   assert.match(script, /rows\.push\(\[s\.t, s\.d, s\.h, s\.C\]\)/);
   assert.doesNotMatch(script, /L_reflect|R_reflect/);
   assert.doesNotMatch(script, /L=\(\[|R=\(\[/);            // لا التقاط لقيم الحسّاسين
+});
+
+// ================= استوديو البرمجة =================
+const GOOD = `LINE_THRESHOLD = 42  # عتبة
+def run():
+    robot.turn(90)
+    robot.straight(300)
+    find_line(1, 250)
+    align_on_line(25)
+    follow_line(400, "L")
+    follow_line(-200, side="R")
+
+run()
+`;
+
+test("الفحص يقبل برنامجًا سليمًا ويعدّ الأوامر بدقة", () => {
+  const r = api.checkProgram(GOOD);
+  assert.equal(r.ok, true, r.errors.join(" | "));
+  assert.equal(r.lines, 6);
+  assert.equal(r.threshold, 42);
+  assert.deepEqual(r.skipped, []);
+  assert.deepEqual(r.errors, []);
+});
+
+test("الفحص يمنع البرنامج الناقص (قوس لم يُغلق) ويذكر السطر", () => {
+  const r = api.checkProgram("robot.turn(90\nrobot.straight(200)\n");
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join(" "), /سطر 1/);
+});
+
+test("الفحص لا يتأثر بالأقواس داخل النصوص والتعليقات", () => {
+  const r = api.checkProgram('LINE_THRESHOLD = 40\n# robot.turn(90 (ناقص\nprint("(")\nrobot.straight(100)\n');
+  assert.equal(r.ok, true, r.errors.join(" | "));
+  assert.equal(r.lines, 1);
+});
+
+test("الفحص يرفض محرّرًا فارغًا أو بلا أوامر مدعومة", () => {
+  assert.equal(api.checkProgram("").ok, false);
+  const r = api.checkProgram("robot.stop()\nwait(100)\n");
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join(" "), /قابل للإرسال/);
+});
+
+test("الفحص يحذّر من الأسطر غير المدعومة ويعدّها", () => {
+  const r = api.checkProgram("robot.turn(90)\nrobot.stop()\n");
+  assert.equal(r.ok, true);
+  assert.equal(r.lines, 1);
+  assert.equal(r.skipped.length, 1);
+  assert.match(r.warnings.join(" "), /robot\.stop\(\)/);
+});
+
+test("الفحص يرفض أكثر من 90 أمرًا (حدّ الـ Hub)", () => {
+  const many = "robot.straight(10)\n".repeat(91);
+  const r = api.checkProgram(many);
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join(" "), /90/);
+});
+
+test("الفحص يحذّر عندما يستخدم الخط بلا LINE_THRESHOLD", () => {
+  const r = api.checkProgram("find_line(1, 250)\nfollow_line(300, \"L\")\n");
+  assert.equal(r.ok, true);
+  assert.equal(r.threshold, null);
+  assert.match(r.warnings.join(" "), /LINE_THRESHOLD/);
+});
+
+test("المكتبة: الاستبدال بالاسم نفسه وإبقاء الأحدث أولًا", () => {
+  let lib = [];
+  lib = api.libUpsert(lib, "أ", "robot.turn(10)", 1);
+  lib = api.libUpsert(lib, "ب", "robot.turn(20)", 2);
+  assert.deepEqual(lib.map(x => x.name), ["ب", "أ"]);
+  lib = api.libUpsert(lib, "أ", "robot.turn(30)", 3);
+  assert.equal(lib.length, 2);
+  assert.equal(lib.find(x => x.name === "أ").code, "robot.turn(30)");
+});
+
+test("المكتبة: تنظيف المدخلات الفاسدة وحدّ أقصى", () => {
+  assert.deepEqual(api.libNormalize("bad"), []);
+  assert.deepEqual(api.libNormalize([null, { name: "", code: "x" }, { name: "ن", code: "  " }]), []);
+  const big = [];
+  for (let i = 0; i < 60; i++) big.push({ name: "p" + i, code: "robot.turn(1)" });
+  assert.equal(api.libNormalize(big).length, api.LIB_MAX);
+  assert.equal(api.libNormalize([{ name: "ن", code: "x", updated: "??" }])[0].updated, 0);
+});
+
+test("المكتبة: الحذف بالاسم", () => {
+  const lib = [{ name: "أ", code: "x" }, { name: "ب", code: "y" }];
+  assert.deepEqual(api.libRemove(lib, "أ").map(x => x.name), ["ب"]);
+  assert.deepEqual(api.libRemove(lib, "غير موجود").map(x => x.name), ["أ", "ب"]);
+});
+
+test("قائمة برامج الـ Hub تُقرأ من سطور V", () => {
+  const out = api.parseHubList([
+    "# V 2",
+    "# P 0 5 خط أول",
+    "# P 1 9 مسار طويل",
+    "# V end",
+    "# إشعار عادي",
+  ]);
+  assert.deepEqual(out, [
+    { index: 0, count: 5, name: "خط أول" },
+    { index: 1, count: 9, name: "مسار طويل" },
+  ]);
+});
+
+test("اسم الملف آمن ويحفظ العربية", () => {
+  assert.equal(api.pyFileName("مسار/سريع"), "مسار_سريع.py");
+  assert.equal(api.pyFileName(""), "program.py");
+  assert.ok(api.pyFileName("a b").indexOf(" ") < 0);
+  assert.equal(api.PROG_NAME_MAX, 20);        // نفس PROG_NAME_MAX في as3_app.py
 });

@@ -334,6 +334,91 @@ class BulkReceiveTests(unittest.TestCase):
         self.assertEqual(m.run_queue, [("straight", 20)])
 
 
+class ProgramStoreTests(unittest.TestCase):
+    """مكتبة برامج على الـ Hub (v6): W حفظ · V عرض · J تشغيل · D حذف."""
+
+    FRAME = "T 90\nS 300\nF 1 250\n"
+
+    def _hub(self, text=None):
+        m = hub_loader.load_app()
+        frame = text if text is not None else self.FRAME
+        hub_loader.feed(m, "B" + "N" + chr(len(frame) & 0xFF) + chr(len(frame) >> 8) + frame + "E")
+        return m
+
+    def test_save_then_list(self):
+        m = self._hub()
+        _, out = capture(hub_loader.feed, m, "W خط أول\n")
+        self.assertIn("حُفظ على الهاب", out)
+        self.assertEqual(len(m.programs), 1)
+        self.assertEqual(m.programs[0][0], "خط أول")
+        _, out2 = capture(hub_loader.feed, m, "V")
+        self.assertIn("# V 1", out2)
+        self.assertIn("# P 0 3 خط أول", out2)
+        self.assertTrue(out2.rstrip().endswith("# V end"))
+
+    def test_saved_program_runs_by_number(self):
+        m = self._hub()
+        hub_loader.feed(m, "W مسار\n")
+        m.run_queue = []                       # كأن الـ Hub أُعيد تشغيله بعد الحفظ
+        _, out = capture(hub_loader.feed, m, "J 0\n")
+        self.assertTrue(m.run_active)
+        self.assertEqual([seg[0] for seg in m.run_queue],
+                         ["turn", "straight", "find_line"])
+        self.assertIn("برنامج محفوظ: مسار", out)
+
+    def test_delete_removes_program(self):
+        m = self._hub()
+        hub_loader.feed(m, "W أ\n")
+        m.run_queue = [("turn", 5)]
+        hub_loader.feed(m, "W ب\n")
+        _, out = capture(hub_loader.feed, m, "D 0\n")
+        self.assertEqual([p[0] for p in m.programs], ["ب"])
+        self.assertIn("حُذف من الهاب", out)
+
+    def test_limit_is_explained_not_silent(self):
+        m = self._hub()
+        for i in range(m.MAX_PROGRAMS):
+            hub_loader.feed(m, "W ب" + str(i) + "\n")
+        self.assertEqual(len(m.programs), m.MAX_PROGRAMS)
+        _, out = capture(hub_loader.feed, m, "W زائد\n")
+        self.assertIn("امتلأت ذاكرة", out)
+        self.assertEqual(len(m.programs), m.MAX_PROGRAMS)
+
+    def test_same_name_replaces(self):
+        m = self._hub()
+        hub_loader.feed(m, "W مكرر\n")
+        m.run_queue = [("straight", 50)]
+        hub_loader.feed(m, "W مكرر\n")
+        self.assertEqual(len(m.programs), 1)
+        self.assertEqual(m.programs[0][1], [("straight", 50)])
+
+    def test_invalid_index_does_not_crash_or_run(self):
+        m = self._hub()
+        for cmd in ("J 0\n", "J -1\n", "J abc\n", "D 9\n"):
+            with self.subTest(cmd=cmd):
+                _, out = capture(hub_loader.feed, m, cmd)
+                self.assertIn("⚠", out)
+                self.assertFalse(m.run_active)
+        self.assertEqual(m.programs, [])
+
+    def test_save_without_program_warns(self):
+        m = hub_loader.load_app()
+        m.run_queue = []
+        m.code_new = []
+        _, out = capture(hub_loader.feed, m, "W لا شيء\n")
+        self.assertIn("لا يوجد برنامج لحفظه", out)
+        self.assertEqual(m.programs, [])
+
+    def test_long_name_is_truncated_not_leaked_into_commands(self):
+        m = self._hub()
+        hub_loader.feed(m, "W " + "ا" * 40 + "\n")
+        self.assertEqual(len(m.programs), 1)
+        self.assertLessEqual(len(m.programs[0][0]), m.PROG_NAME_MAX)
+        # الـ Hub عاد جاهزًا: أمر عادي بعد الاسم يُنفَّذ
+        hub_loader.feed(m, "V")
+        self.assertFalse(m.code_mode)
+
+
 class RecordingTests(unittest.TestCase):
     def test_action_limit_keeps_tracking_point(self):
         m = hub_loader.load_app()

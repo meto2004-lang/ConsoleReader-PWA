@@ -11,6 +11,9 @@
 #   إخفاء الصفحة كي لا تتوقف بسبب تقييد مؤقتات المتصفح).
 # عتاة الخط من التطبيق: H ثم الرقم ثم سطر جديد (مثال: "H 49\n").
 # نسخة الـ Hub تُطبع عند البدء: HUB_VERSION
+# مكتبة برامج على الـ Hub (v6): W <اسم> = احفظ البرنامج المستلم، V = اعرض القائمة،
+#   J <رقم> = شغّل برنامجًا محفوظًا، D <رقم> = احذفه. التخزين في RAM (تُفقد
+#   البرامج بإعادة تشغيل الـ Hub) — النسخة الدائمة في مكتبة التطبيق.
 
 from pybricks.hubs import PrimeHub
 from pybricks.pupdevices import Motor, ColorSensor
@@ -51,7 +54,7 @@ robot = DriveBase(left_motor, right_motor, WHEEL_DIAMETER, AXLE_TRACK)
 robot.use_gyro(True)  # نفس إعداد برنامج السباق (جيرو مفعّل)
 
 # إصدار برنامج الـ Hub — يظهر في سجل التطبيق ليعرف المستخدم أن النسخة محدَّثة
-HUB_VERSION = "5"
+HUB_VERSION = "6"
 
 # عتبات دنيا تتجاهل اهتزاز اليد
 MIN_DIST = 5  # أقل من 5 مم = ضجيج
@@ -480,6 +483,12 @@ code_bulk    = False  # هل الاستلام بحزم N (طريقة التطب�
 code_single  = False  # أمر إعداد من سطر واحد (H) — يخرج من الاستلام بعد السطر
 bulk_hdr     = -1     # -1 = بين الحزم، 0/1 = عدد بايتات الطول المستلمة
 bulk_left    = 0      # عدد أحرف الحمولة المتبقية في الحزمة الحالية
+PROG_NAME_MAX    = 20     # أقصى طول اسم برنامج محفوظ على الهاب
+MAX_PROGRAMS     = 4      # أقصى عدد برامج محفوظة في RAM (ذاكرة الهاب ضيقة)
+
+programs   = []   # [[الاسم, المقاطع], …] — المقاطع نفسها التي تُنفَّذ
+single_cmd = ""   # بادئة أمر أحادي السطر: "H" | "W" | "J" | "D"
+
 code_watch   = StopWatch()   # لقياس مهل الاستلام
 
 run_watch    = StopWatch()   # مدة التنفيذ الكلية
@@ -558,6 +567,98 @@ def set_threshold(value):
     print("# عتاة الخط من التطبيق = " + str(run_th))
     hub.speaker.beep(650, 60)
 
+# ---------------------------------------------------------
+# مكتبة برامج على الـ Hub (v6)
+#
+#   التخزين في RAM: المقاطع نفسها التي يُنفّذها G، بلا نصوص إضافية.
+#   الهدف: تشغيل برنامج محفوظ بلا هاتف (J <رقم>)، والتنقّل بين بدائل
+#   أثناء التجربة. النسخة الدائمة تبقى في مكتبة التطبيق (localStorage)
+#   لأن ذاكرة الـ Hub تُصفَّر عند إعادة التشغيل.
+# ---------------------------------------------------------
+def store_list():
+    # V: قائمة البرامج المحفوظة — بصيغة يفهمها التطبيق
+    print("# V " + str(len(programs)))
+    i = 0
+    for p in programs:
+        print("# P " + str(i) + " " + str(len(p[1])) + " " + p[0])
+        i += 1
+    print("# V end")
+    hub.speaker.beep(700, 80)
+
+def store_save(name):
+    # W <اسم>: احفظ البرنامج المستلم الآن (run_queue) — يستبدل الاسم نفسه
+    if not run_queue:
+        print("# ⚠ لا يوجد برنامج لحفظه — أرسل الكود أولًا")
+        hub.speaker.beep(250, 250)
+        return
+    name = name.strip()[:PROG_NAME_MAX]
+    if not name:
+        name = "برنامج " + str(len(programs) + 1)
+    for p in programs:
+        if p[0] == name:
+            p[1] = run_queue
+            print("# ✓ حُدِّث على الهاب: " + name)
+            hub.speaker.beep(900, 150)
+            return
+    if len(programs) >= MAX_PROGRAMS:
+        print("# ⚠ امتلأت ذاكرة الـ Hub (" + str(MAX_PROGRAMS) + " برامج) — احذف واحدًا: D <رقم>")
+        hub.speaker.beep(250, 250)
+        return
+    programs.append([name, run_queue])
+    print("# ✓ حُفظ على الهاب: " + name + " (" + str(len(programs)) + "/" + str(MAX_PROGRAMS) + ")")
+    hub.speaker.beep(900, 150)
+
+def store_run(idx):
+    # J <رقم>: شغّل برنامجًا محفوظًا (بلا حاجة إلى إعادة إرسال من الهاتف)
+    global run_queue
+    if idx < 0 or idx >= len(programs):
+        print("# ⚠ لا يوجد برنامج بهذا الرقم — اضغط «تحديث قائمة الـ Hub»")
+        hub.speaker.beep(250, 250)
+        return
+    if run_active:
+        run_cancel("تشغيل برنامج محفوظ")
+    run_queue = programs[idx][1]
+    print("# ▶ برنامج محفوظ: " + programs[idx][0])
+    run_start()
+
+def store_del(idx):
+    # D <رقم>: احذف برنامجًا محفوظًا
+    if idx < 0 or idx >= len(programs):
+        print("# ⚠ لا يوجد برنامج بهذا الرقم")
+        hub.speaker.beep(250, 250)
+        return
+    name = programs[idx][0]
+    del programs[idx]
+    print("# ✗ حُذف من الهاب: " + name + " — المتبقي: " + str(len(programs)))
+    hub.speaker.beep(500, 120)
+
+def handle_single(line):
+    # أوامر سطر واحد بأرقام (H/W/J/D): تُستلم مثل H ثم تُنفَّذ فورًا
+    global single_cmd
+    kind = single_cmd
+    single_cmd = ""
+    parts = line.split()
+    arg = parts[1] if len(parts) > 1 else ""
+    if kind == "W":
+        # الاسم قد يحتوي مسافات: كل ما بعد الحرف الأول
+        store_save(line[2:] if len(line) > 2 else "")
+        return
+    if kind == "H":
+        try:
+            set_threshold(int(float(arg)))
+        except (ValueError, IndexError):
+            print("# ⚠ عتاة خط غير صالحة — أُبقيت السابقة")
+            hub.speaker.beep(250, 250)
+        return
+    try:
+        idx = int(float(arg))
+    except (ValueError, IndexError):
+        idx = -1
+    if kind == "J":
+        store_run(idx)
+    elif kind == "D":
+        store_del(idx)
+
 def code_add_char(cmd):
     # حرف واحد من نص الكود: يجمعه في السطر الجاري أو ينهيه.
     # تُستخدم في الوضعين: أسطر K…E القديمة، وحزم N الجديدة.
@@ -584,6 +685,11 @@ def code_take_line():
     code_line = ""
     if not line:
         code_bad = False
+        return
+    if code_single:
+        # أمر أحادي السطر (H/W/J/D): المسار مختلف — لا مقاطع ولا قائمة تنفيذ
+        code_bad = False
+        handle_single(line)
         return
     if code_bad:
         # السطر تجاوز الحد: قد يكون مبتورًا (S 4000 → S 400) فلا ننفّذه أبدًا
@@ -1088,10 +1194,16 @@ def handle_app_command(cmd):
     if cmd == "G":
         run_start()
         return
-    if cmd == "H":
-        # العتبة تصل كسطر: "H 49\n" — ثم يعود الـ Hub جاهزًا لأمر G
+    if cmd == "V":
+        # قائمة البرامج المحفوظة على الـ Hub بلا وسيط
+        store_list()
+        return
+    if cmd in ("H", "W", "J", "D"):
+        # أمر بسطر واحد: الحرف ثم الوسيط ثم سطر جديد — يعود الـ Hub جاهزًا بعده
+        global single_cmd
         code_receive_start(False, True)
-        code_line = "H "
+        code_line = cmd + " "
+        single_cmd = cmd
         return
 
     # --- إيقاف: تنفيذ كود جارٍ أو تحرير المحركات ---
@@ -1135,6 +1247,7 @@ last_heading = hub.imu.heading()
 hub.light.on(Color.BLUE)
 print("")
 print("# HUB_VERSION " + HUB_VERSION)
+print("# برامج محفوظة على الهاب: " + str(len(programs)) + "/" + str(MAX_PROGRAMS) + " (RAM)")
 print("# ذاكرة حرة: " + str(gc.mem_free()) + " بايت")
 print("# جاهز: حرّك الروبوت بيدك أو من تطبيق الويب، ثم اضغط للتسجيل")
 print("# التطبيق: R تسجيل حركة | L قراءة حساسات | C طباعة البرنامج")

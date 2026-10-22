@@ -32,6 +32,10 @@ jobs:
           node-version: "20"
       - name: الاختبارات
         run: node --test tests/web.test.mjs
+      - name: تثبيت jsdom (لاختبار الواجهة)
+        run: npm install jsdom --no-save --no-fund --no-audit
+      - name: اختبار الواجهة في DOM محاكى
+        run: node tests/ui_smoke.mjs
 
   service-worker:
     name: ثبات Service Worker
