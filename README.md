@@ -121,9 +121,12 @@ New-NetFirewallRule -DisplayName "ConsoleReader web (TCP 8000)" -Direction Inbou
 1. افتح `as3_app.py` في **Pybricks Code** وشغّله/نزّله على الـ Hub مرة واحدة، ثم افصل Pybricks Code عن الـ Hub (البلوتوث يقبل اتصالًا واحدًا فقط).
 2. افتح `app/index.html` في متصفح **Chrome** (كمبيوتر أو جوال أندرويد) عبر `https` أو `localhost` — مثلًا عبر GitHub Pages أو خادم محلي:
    ```bash
-   python3 -m http.server 8000
+   python3 tools/dev_server.py          # يفتح /app/ تلقائيًا، ويُرسل no-store
    # ثم افتح http://localhost:8000/app/
    ```
+   `tools/dev_server.py` مجرّد خادم تطوير: الجذر `/` يعيد التوجيه إلى `/app/`، ويمنع
+   المتصفح من تخزين `index.html`/`sw.js` أثناء التعديل. للنشر العادي يكفي
+   `python3 -m http.server 8000` من جذر المشروع.
 3. اضغط «اتصال بالبلوتوث» واختر الـ Hub، ثم «▶ تشغيل برنامج التدريب» (أو شغّله من زر الـ Hub). انتظر ظهور `APP_READY` في سجل التطبيق وإضاءة الـ Hub باللون الأزرق.
 4. ادفع الروبوت بيدك — أو حرّكه من أسهم التحكم عن بعد — إلى النقطة المطلوبة، ثم اضغط زر التطبيق المناسب:
 
