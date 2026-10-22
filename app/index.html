@@ -186,8 +186,8 @@
       </div>
       <label class="switch" for="chkAutoRead">
         <input type="checkbox" id="chkAutoRead" checked>
-        <span>📡 <b>قراءة الحساسات تلقائيًا مع الحركة</b><br>
-          <small>يبثّ الروبوت سطر قياس (<code># T d=… h=… L=… R=…</code>) أثناء تحرّكه بالأسهم أو باليد — دون الحاجة لزر «قراءة الحساسات».</small></span>
+        <span>📡 <b>قراءة الحسّاس تلقائيًا مع الحركة</b><br>
+          <small>يبثّ الروبوت سطر قياس (<code># T d=… h=… C=…</code>) من حسّاس الألوان الوحيد على المنفذ <b>C</b> أثناء تحرّكه بالأسهم أو باليد — دون الحاجة لزر «قراءة الحساسات».</small></span>
       </label>
     </section>
 
@@ -199,7 +199,7 @@
           <span class="hint">بديل زر RIGHT — دوران ثم مستقيم (مفتاح R)</span>
         </button>
         <button class="train" data-cmd="L">
-          <span class="icon">🎨</span><span class="name">قراءة الحساسات</span>
+          <span class="icon">🎨</span><span class="name">قراءة الحسّاس</span>
           <span class="hint">بديل زر LEFT — لحساب عتبة الخط (مفتاح L)</span>
         </button>
         <button class="train" data-cmd="F">
@@ -434,11 +434,11 @@ function appendLog(text) {
     if (line.indexOf("# برنامج السباق الذكي") >= 0) allowFill = true;   // برنامج جديد مطبوع
     if (line.indexOf("# HUB_VERSION") === 0) hubVersion = line.replace("# HUB_VERSION", "").trim();
     // عيّنات # T تُحفظ بطابع زمني حقيقي (CSV) بدل الزمن التقديري
-    const tel = line.match(/^# T d=(-?[\d.]+) h=(-?[\d.]+) L=([\d.]+) R=([\d.]+)/);
+    const tel = line.match(/^# T d=(-?[\d.]+) h=(-?[\d.]+) C=([\d.]+)/);
     if (tel) {
       telemetry.push({
         t: ((performance.now() - bootTime) / 1000).toFixed(1),
-        d: tel[1], h: tel[2], L: tel[3], R: tel[4]
+        d: tel[1], h: tel[2], C: tel[3]
       });
       if (telemetry.length > 20000) telemetry.shift();
     }
@@ -622,7 +622,7 @@ const sendHubCommand = code => { // أوامر Pybricks المباشرة (بدو
 // ===== تغذية راجعة: تنبيه مؤقّت عند الضغط (السجل يبقى لبيانات الروبوت) =====
 const CMD_LABELS = {
   R: "تسجيل حركة (دوران ثم مستقيم)",
-  L: "قراءة الحساسات (لحساب عتبة الخط)",
+  L: "قراءة الحسّاس (لحساب عتبة الخط — حسّاس الألوان على C)",
   F: "نقطة خط ذكية find_line",
   T: "متابعة خط follow_line",
   U: "تراجع — حذف آخر تسجيل",
@@ -703,7 +703,7 @@ $("chkAutoRead").addEventListener("change", e => {
     return;
   }
   sendCmd(on ? "y" : "z");
-  showToast(on ? "📡 القراءة التلقائية للحساسات: مفعّلة" : "📡 القراءة التلقائية: متوقفة");
+  showToast(on ? "📡 القراءة التلقائية للحسّاس: مفعّلة" : "📡 القراءة التلقائية: متوقفة");
 });
 
 const RC_BTN_BY_CH = { [RC.fwd]: "rcFwd", [RC.back]: "rcBack", [RC.left]: "rcLeft", [RC.right]: "rcRight" };
@@ -1020,8 +1020,8 @@ async function sendProgramToRobot(runIt) {
 // الزمن حقيقي (يُسجَّل لحظة وصول السطر) بدل تقدير 0.1 ثانية لكل عينة:
 // البثّ يتوقف عند السكون، فالتقدير كان يُزيح المحور الزمني.
 function telemetryCsv() {
-  const rows = [["t_s", "d_mm", "h_deg", "L_reflect", "R_reflect"]];
-  for (const s of telemetry) rows.push([s.t, s.d, s.h, s.L, s.R]);
+  const rows = [["t_s", "d_mm", "h_deg", "C_reflect"]];
+  for (const s of telemetry) rows.push([s.t, s.d, s.h, s.C]);
   return rows.map(r => r.join(",")).join("\n") + "\n";
 }
 

@@ -64,6 +64,105 @@ class GeneratedProgramTests(unittest.TestCase):
         self.assertNotIn("ColorSensor(Port.C)", text)   # لا نضيف حساسات بلا داعٍ
 
 
+class SingleSensorTests(unittest.TestCase):
+    """النسخة الحالية تعتمد على حسّاس ألوان واحد على المنفذ C."""
+
+    def test_generated_program_uses_one_sensor_only(self):
+        m = hub_loader.load_app()
+        m.actions.clear()
+        m.refl.clear()
+        m.actions.append(("sensor", ["# LINE sensor (Port.C): reflection=9"], None, None))
+        m.actions.append(("move", [("find_line", (1, 250)), ("align_line", 25)], 0, 0))
+        m.actions.append(("move", [("follow_line", (300, "L"))], 250, 0))
+        text = capture(m.print_full_program)[1]
+        text = text.split("#@@PROGRAM_BEGIN@@")[1].split("#@@PROGRAM_END@@")[0]
+        compile(text, "<generated>", "exec")
+        self.assertIn("line_sensor = ColorSensor(Port.C)", text)
+        self.assertNotIn("Port.D", text)                 # لا حسّاس ثانٍ
+        self.assertNotIn("right_sensor", text)
+        self.assertEqual(text.count("ColorSensor("), 1)  # تهيئة واحدة فقط
+        # كل الدوال المساعدة تقرأ من الحسّاس الوحيد
+        self.assertEqual(text.count("line_sensor.reflection()"), 3)
+
+    def test_original_program_uses_one_sensor_only(self):
+        m = hub_loader.load_original()
+        m.actions.clear()
+        m.refl.clear()
+        m.actions.append(("move", [("find_line", (1, 250)), ("align_line", 25)], 0, 0))
+        text = capture(m.print_full_program)[1]
+        self.assertNotIn("Port.D", text)
+        self.assertEqual(text.count("ColorSensor("), 1)
+
+    def test_hub_reads_the_line_sensor(self):
+        m = hub_loader.load_app()
+        self.assertIs(m.line_sensor, m.line_sensor)      # كائن واحد
+        self.assertFalse(hasattr(m, "right_sensor"))
+        m.line_sensor.reflection_value = 12
+        self.assertEqual(m.sample_sensors(True), 12)
+
+    def test_find_stops_when_the_single_sensor_sees_the_line(self):
+        m = hub_loader.load_app()
+        m.run_th = 40
+        m.run_phase = "start"
+        m.line_sensor.reflection_value = 10              # على الخط مباشرة
+        self.assertFalse(m._run_step_find(1, 250))       # خطوة التهيئة
+        self.assertTrue(m._run_step_find(1, 250))        # يكتشف الخط فيتوقف
+        self.assertEqual(m.robot.braked, 1)
+
+    def test_find_ignores_bright_surface(self):
+        m = hub_loader.load_app()
+        m.run_th = 40
+        m.run_phase = "start"
+        m.line_sensor.reflection_value = 90              # خلفية بيضاء
+        self.assertFalse(m._run_step_find(1, 250))
+        self.assertFalse(m._run_step_find(1, 250))
+        self.assertEqual(m.robot.braked, 0)
+
+    def test_align_is_a_rotation_search(self):
+        m = hub_loader.load_app()
+        m.run_th = 40
+        m.run_phase = "start"
+        m.line_sensor.reflection_value = 20              # يرى الخط
+        self.assertFalse(m._run_step_align(25))          # تهيئة
+        self.assertTrue(m._run_step_align(25))
+        m2 = hub_loader.load_app()
+        m2.run_th = 40
+        m2.run_phase = "start"
+        m2.line_sensor.reflection_value = 80             # لا يرى الخط: يستمر بالدوران
+        self.assertFalse(m2._run_step_align(25))
+        self.assertFalse(m2._run_step_align(25))
+
+    def test_smart_line_point_has_no_useless_align(self):
+        m = hub_loader.load_app()
+        m.actions.clear()
+        m.last_distance = 0
+        m.last_heading = 0
+        m.robot.distance_value = 200
+        m.line_sensor.reflection_value = 8               # على الخط الآن
+        m.do_find_line_point()
+        segs = m.actions[-1][1]
+        self.assertEqual([seg[0] for seg in segs], ["find_line"])   # بلا align
+        self.assertEqual(segs[0][1], (1, 250))           # 200 + هامش 50
+
+    def test_auto_read_streams_one_sensor_line(self):
+        m = hub_loader.load_app()
+        m.auto_tick = 0
+        m.watch_d = 0
+        m.watch_h = 0
+        m.robot.distance_value = 120                     # حركة → بثّ
+        m.line_sensor.reflection_value = 33
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            for _ in range(m.AUTO_SAMPLE_EVERY):   # تُقرأ كل 3 دورات
+                m.auto_read_tick()
+        line = buf.getvalue().strip()
+        self.assertTrue(line.startswith("# T d=120"), line)
+        self.assertIn(" C=33", line)
+        self.assertNotIn(" R=", line)                    # لا حسّاس ثانٍ
+
+
 class ThresholdTests(unittest.TestCase):
     """عتبة الخط تُحسب من العدّادين بدل قائمة العينات (توفير ذاكرة)."""
 

@@ -33,8 +33,13 @@ hub = PrimeHub()
 left_motor  = Motor(Port.A, Direction.COUNTERCLOCKWISE)  # عدّل الاتجاه إذا لزم
 right_motor = Motor(Port.B)
 
-left_sensor  = ColorSensor(Port.C)   # حساس الشمال
-right_sensor = ColorSensor(Port.D)   # حساس اليمين
+# حساس ألوان واحد فقط، مركّب على المنفذ C.
+#   كل القراءات (عتبة الخط، البحث عن الخط، المحاذاة، متابعة الحافة) تعتمد
+#   على هذا الحسّاس وحده — لا يوجد حسّاس على D. غيّر LINE_PORT فقط إن كان
+#   الحسّاس في منفذ آخر.
+LINE_PORT        = Port.C
+LINE_PORT_LETTER = "C"          # نفس المنفذ أعلاه — يُطبع في البرنامج الناتج
+line_sensor = ColorSensor(LINE_PORT)
 
 # =========================================================
 # 2) أبعاد الروبوت (عدّلها لاحقاً للمعايرة الدقيقة)
@@ -46,7 +51,7 @@ robot = DriveBase(left_motor, right_motor, WHEEL_DIAMETER, AXLE_TRACK)
 robot.use_gyro(True)  # نفس إعداد برنامج السباق (جيرو مفعّل)
 
 # إصدار برنامج الـ Hub — يظهر في سجل التطبيق ليعرف المستخدم أن النسخة محدَّثة
-HUB_VERSION = "4"
+HUB_VERSION = "5"
 
 # عتبات دنيا تتجاهل اهتزاز اليد
 MIN_DIST = 5  # أقل من 5 مم = ضجيج
@@ -57,6 +62,11 @@ SEARCH_MARGIN = 50   # هامش بحث إضافي بعد المسافة المج
 MIN_SEARCH    = 80   # أدنى مسافة بحث عن الخط
 FOLLOW_GAIN   = 2.5  # معامل التحكم P لمتابعة الخط
 ALIGN_SPEED   = 25   # سرعة الدوران للمحاذاة (deg/s)
+
+# بالحسّاس الواحد لا يمكن استنتاج «أي حافة» نتبع من مقارنة حساسين،
+# فالجانب يُثبَّت هنا: "L" يصحّح نحو اليسار، "R" نحو اليمين.
+# اقلبه إذا كان الروبوت يبتعد عن الخط بدل أن يلتصق بحافته.
+FOLLOW_SIDE   = "L"
 
 # تسارع الحركات في برنامج السباق الناتج (نعومة أثناء التشغيل)
 MOVE_ACCEL      = 1200
@@ -111,7 +121,7 @@ def wait_for_release():
         wait(10)
 
 def setup_lines(include_sensors):
-    # مقدمة البرنامج الناتج. تُضاف تهيئة الحساسين إذا سُجّلت قراءات أو نقاط ذكية،
+    # مقدمة البرنامج الناتج. تُضاف تهيئة الحسّاس (الوحيد) إذا سُجّلت قراءات أو نقاط ذكية،
     # حتى لا يفشل برنامج السباق عند تشغيله بدون حساسات.
     lines = [
         "from pybricks.hubs import PrimeHub",
@@ -125,9 +135,9 @@ def setup_lines(include_sensors):
         "right_motor = Motor(Port.B)",
     ]
     if include_sensors:
+        # حساس واحد فقط (المنفذ C) — نفس إعداد نسخة الـ Hub
         lines += [
-            "left_sensor  = ColorSensor(Port.C)",
-            "right_sensor = ColorSensor(Port.D)",
+            "line_sensor = ColorSensor(Port." + LINE_PORT_LETTER + ")  # الحسّاس الوحيد",
         ]
     lines += [
         "robot = DriveBase(left_motor, right_motor, " + str(WHEEL_DIAMETER) + ", " + str(AXLE_TRACK) + ")",
@@ -166,11 +176,11 @@ def smart_helpers_lines():
         th_line,
         "",
         "def find_line(direction=1, max_dist=250, speed=80):",
-        "    # يتحرك ببطء حتى يكشف أحد الحساسين خطاً ثم يتوقف (أدقّ من المسار المفتوح)",
+        "    # يتحرك ببطء حتى يكشف الحسّاس خطاً ثم يتوقف (أدقّ من المسار المفتوح)",
         "    robot.reset()",
         "    robot.drive(direction * speed, 0)",
         "    while abs(robot.distance()) < max_dist:",
-        "        if left_sensor.reflection() < LINE_THRESHOLD or right_sensor.reflection() < LINE_THRESHOLD:",
+        "        if line_sensor.reflection() < LINE_THRESHOLD:",
         "            robot.stop()",
         "            return True",
         "        wait(10)",
@@ -178,11 +188,12 @@ def smart_helpers_lines():
         "    return False",
         "",
         "def align_on_line(speed=" + str(ALIGN_SPEED) + ", max_angle=45):",
-        "    # يدور في مكانه حتى يستوي كلا الحساسين فوق الخط (تصحيح الاتجاه)",
+        "    # يدور في مكانه حتى يرى الحسّاس الخط (بحث بالدوران)، ثم يتوقف",
+        "    # إن كان الحسّاس فوق الخط أصلاً يعود فورًا",
         "    robot.reset()",
         "    robot.drive(0, speed)",
         "    while abs(robot.angle()) < max_angle:",
-        "        if left_sensor.reflection() < LINE_THRESHOLD and right_sensor.reflection() < LINE_THRESHOLD:",
+        "        if line_sensor.reflection() < LINE_THRESHOLD:",
         "            robot.stop()",
         "            return True",
         "        wait(10)",
@@ -190,14 +201,14 @@ def smart_helpers_lines():
         "    return False",
         "",
         'def follow_line(dist, side="L", speed=90):',
-        "    # يتبع حافة الخط بتحكم P لمسافة dist مم (side = الحساس الذي يتبع الحافة)",
+        "    # يتبع حافة الخط بالحسّاس الواحد بتحكم P لمسافة dist مم",
+        '    # side = اتجاه التصحيح: "L" نحو اليسار، "R" نحو اليمين',
         "    # المسافة السالبة = متابعة الخط أثناء الرجوع للخلف",
-        '    s = left_sensor if side == "L" else right_sensor',
         '    sign = 1 if side == "L" else -1',
         '    spd = speed if dist >= 0 else -speed',
         "    robot.reset()",
         "    while abs(robot.distance()) < abs(dist):",
-        "        error = s.reflection() - LINE_THRESHOLD",
+        "        error = line_sensor.reflection() - LINE_THRESHOLD",
         "        robot.drive(spd, sign * (" + str(FOLLOW_GAIN) + ") * error)",
         "        wait(10)",
         "    robot.stop()",
@@ -752,7 +763,7 @@ def _run_step_find(direction, max_dist):
         run_base_d = robot.distance()
         run_phase = "go"
         return False
-    if left_sensor.reflection() < run_th or right_sensor.reflection() < run_th:
+    if line_sensor.reflection() < run_th:
         robot.brake()
         return True
     if abs(robot.distance() - run_base_d) >= max_dist:
@@ -767,7 +778,7 @@ def _run_step_align(speed):
         run_base_h = hub.imu.heading()
         run_phase = "go"
         return False
-    if left_sensor.reflection() < run_th and right_sensor.reflection() < run_th:
+    if line_sensor.reflection() < run_th:
         robot.brake()
         return True
     if abs(hub.imu.heading() - run_base_h) >= RUN_ALIGN_MAX:
@@ -785,11 +796,10 @@ def _run_step_follow(dist, side):
     if abs(robot.distance() - run_base_d) >= abs(dist):
         robot.brake()
         return True
-    s = left_sensor if side == "L" else right_sensor
     sign = 1 if side == "L" else -1
     # المسافة السالبة = متابعة الخط أثناء الرجوع للخلف
     spd = run_speed if dist >= 0 else -run_speed
-    robot.drive(spd, int(sign * FOLLOW_GAIN * (s.reflection() - run_th)))
+    robot.drive(spd, int(sign * FOLLOW_GAIN * (line_sensor.reflection() - run_th)))
     return False
 
 def run_tick():
@@ -847,13 +857,12 @@ watch_d = 0
 watch_h = 0
 
 def sample_sensors(keep):
-    # يقرأ الحساسين، ويضيف العينة (الأظلم منهما) لنطاق المعايرة إذا طُلب.
+    # يقرأ الحسّاس الوحيد، ويضيف العينة لنطاق المعايرة إذا طُلب.
     # keep=False عند السكون: العيّنة الساكنة (ظلّ يد أو روبوت مرفوع) تُفسد العتبة.
-    l = left_sensor.reflection()
-    r = right_sensor.reflection()
+    v = line_sensor.reflection()
     if keep:
-        refl.add(l if l < r else r)
-    return l, r
+        refl.add(v)
+    return v
 
 def auto_read_tick():
     # تُنادى كل دورة من الحلقة الرئيسية؛ تقرأ كل ~100ms
@@ -869,14 +878,13 @@ def auto_read_tick():
     watch_d = d
     watch_h = h
 
-    l, r = sample_sensors(hand_moved or rc_driving)
+    v = sample_sensors(hand_moved or rc_driving)
 
     # أثناء تنفيذ الكود لا نبثّ سطر قياس لكل خطوة (لئلا يمتلئ السجل)،
     # فالتطبيق يعرض تقدّم التنفيذ سطرًا لكل مقطع.
     if AUTO_STREAM and not run_active and (rc_driving or hand_moved):
-        # سطر مضغوط: d=المسافة h=الاتجاه L/R=الانعكاس
-        print("# T d=" + str(int(d)) + " h=" + str(int(h))
-              + " L=" + str(l) + " R=" + str(r))
+        # سطر مضغوط: d=المسافة h=الاتجاه C=انعكاس الحسّاس الوحيد
+        print("# T d=" + str(int(d)) + " h=" + str(int(h)) + " C=" + str(v))
 
 MAX_ACTIONS = 60   # أقصى عدد تسجيلات (ذاكرة الـ Hub محدودة)
 
@@ -911,16 +919,15 @@ def do_undo():
 
 def do_find_line_point():
     global last_distance, last_heading
-    # نقطة خط ذكية: تستبدل الحركة منذ آخر تسجيل ببحث دقيق عن الخط،
-    # وتضيف محاذاة إذا كان الحسّاسان فوق الخط الآن.
+    # نقطة خط ذكية: تستبدل الحركة منذ آخر تسجيل ببحث دقيق عن الخط.
+    #   بالحسّاس الواحد لا نضيف محاذاة بعد find_line: فالحسّاس يكون على
+    #   الخط مباشرة بعد البحث، والمحاذاة تصبح بلا أثر (تُرجع فورًا).
     curr_distance = robot.distance()
     curr_heading = hub.imu.heading()
     diff_dist = curr_distance - last_distance
     diff_head = curr_heading - last_heading
 
-    l = left_sensor.reflection()
-    r = right_sensor.reflection()
-    refl.add(l if l < r else r)
+    refl.add(line_sensor.reflection())
 
     segs = []
     if abs(diff_head) >= MIN_ANG:
@@ -929,12 +936,6 @@ def do_find_line_point():
     direction = 1 if diff_dist >= 0 else -1
     max_dist = max(int(round(abs(diff_dist))) + SEARCH_MARGIN, MIN_SEARCH)
     segs.append(("find_line", (direction, max_dist)))
-
-    th = estimated_threshold()
-    if th is None:
-        th = 30  # نفس القيمة الافتراضية في البرنامج الناتج
-    if l < th and r < th:
-        segs.append(("align_line", ALIGN_SPEED))
 
     if push_action("move", segs, last_distance, last_heading):
         for seg in segs:
@@ -951,18 +952,16 @@ def do_follow_line_seg():
     diff_dist = curr_distance - last_distance
     diff_head = curr_heading - last_heading
 
-    l = left_sensor.reflection()
-    r = right_sensor.reflection()
-    refl.add(l if l < r else r)
+    refl.add(line_sensor.reflection())
 
     segs = []
     if abs(diff_head) >= MIN_ANG:
         segs.append(("turn", int(round(diff_head))))
 
     if abs(diff_dist) >= MIN_DIST:
-        side = "L" if l <= r else "R"
+        # الجانب من الثابت FOLLOW_SIDE (لا مقارنة حساسين بعد الآن)
         # نحفظ الإشارة: الدفع للخلف يبقى متابعة خط بالخلف
-        segs.append(("follow_line", (int(round(diff_dist)), side)))
+        segs.append(("follow_line", (int(round(diff_dist)), FOLLOW_SIDE)))
 
     if segs:
         if push_action("move", segs, last_distance, last_heading):
@@ -1009,10 +1008,9 @@ def do_record_move():
         print("# حركة أصغر من العتبة - تم تجاهلها")
 
 def do_read_sensors():
-    l_line, l_ref = print_sensor("LEFT sensor (Port.C)", left_sensor)
-    r_line, r_ref = print_sensor("RIGHT sensor (Port.D)", right_sensor)
-    refl.add(l_ref if l_ref < r_ref else r_ref)
-    if push_action("sensor", [l_line, r_line]):
+    line, ref = print_sensor("LINE sensor (Port." + LINE_PORT_LETTER + ")", line_sensor)
+    refl.add(ref)
+    if push_action("sensor", [line]):
         hub.speaker.beep(750, 80)
 
 def do_print_program():
@@ -1148,7 +1146,7 @@ print("#          H ثم الرقم = عتاة الخط للتنفيذ | p/q ن�
 print("#          و x أثناء التنفيذ = إيقافه فورًا")
 print("# أزرار الروبوت ما زالت تعمل:")
 print("# - RIGHT       : تسجيل حركة (دوران ثم مستقيم)")
-print("# - LEFT        : تسجيل قراءات الحساسين (لحساب عتاة الخط)")
+print("# - LEFT        : تسجيل قراءة الحسّاس (لحساب عتاة الخط)")
 print("# - CENTER+LEFT : نقطة خط ذكية find_line (+ محاذاة) بدل آخر مستقيم")
 print("# - CENTER+RIGHT: مقطع متابعة خط follow_line بآخر مسافة")
 print("# - LEFT+RIGHT  : حذف آخر تسجيل (مع إرجاع نقطة القياس)")

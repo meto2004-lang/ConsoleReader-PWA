@@ -81,3 +81,20 @@ test("حزمة واحدة لكل 90 بايت كحد أقصى", () => {
   assert.equal(frames.length, 12);
   assert.ok(frames.every(f => f.length <= 93));
 });
+
+test("سطر القياس يخصّ حسّاسًا واحدًا على C (لا L/R)", () => {
+  // الحسّاس الوحيد على المنفذ C: البثّ والـ CSV يجب ألا يذكرا L/R
+  const telRe = script.match(/const tel = line\.match\(\/(.+?)\/\);/);
+  assert.ok(telRe, "لم أجد سطر تحليل # T");
+  const re = new RegExp(telRe[1]);
+  const sample = "# T d=120 h=-45 C=33";
+  const m = sample.match(re);
+  assert.ok(m, "سطر القياس الجديد لم يُطابق");
+  assert.deepEqual(m.slice(1), ["120", "-45", "33"]);
+  assert.equal(("# T d=120 h=-45 L=33 R=34").match(re), null);   // صيغة قديمة = مرفوضة
+
+  assert.match(script, /\["t_s", "d_mm", "h_deg", "C_reflect"\]/);  // ترويسة CSV
+  assert.match(script, /rows\.push\(\[s\.t, s\.d, s\.h, s\.C\]\)/);
+  assert.doesNotMatch(script, /L_reflect|R_reflect/);
+  assert.doesNotMatch(script, /L=\(\[|R=\(\[/);            // لا التقاط لقيم الحسّاسين
+});
