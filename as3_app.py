@@ -172,7 +172,7 @@ def smart_helpers_lines():
         th_line = ("LINE_THRESHOLD = " + str(th) + "  # محسوبة من قياساتك"
                    + " (الخط ≈ " + str(refl.lo) + "، الخلفية ≈ " + str(refl.hi) + ")")
     return [
-        "# --- دوال التصحيح الذكي بالحساسات ---",
+        "# --- دوال التصحيح الذكي بالحسّاس الواحد ---",
         th_line,
         "",
         "def find_line(direction=1, max_dist=250, speed=80):",
