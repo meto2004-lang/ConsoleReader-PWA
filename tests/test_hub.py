@@ -419,6 +419,105 @@ class ProgramStoreTests(unittest.TestCase):
         self.assertFalse(m.code_mode)
 
 
+class AppCommandRoutingTests(unittest.TestCase):
+    """كل حرف يرسله التطبيق يجب أن يصل إلى وظيفته على الـ Hub.
+
+    الحروف R/L/F/T/U/C (أزرار التدريب) و w/s/a/d (التحكم عن بعد) كانت
+    تُرسَل من التطبيق ولا يجدها الـ Hub — عطل صامت لا يظهر في أي اختبار
+    لأن الاختبارات كانت تنادي دوال do_* مباشرة. هذه المجموعة تمرّر الحرف
+    عبر ``handle_app_command`` نفسه كما يفعل stdin.
+    """
+
+    def _hub(self):
+        m = hub_loader.load_app()
+        m.actions.clear()
+        m.refl.clear()
+        return m
+
+    def _called(self, m, ch):
+        seen = []
+        for name in ("do_record_move", "do_read_sensors", "do_print_program",
+                     "do_find_line_point", "do_follow_line_seg", "do_undo"):
+            original = getattr(m, name)
+            def spy(*a, _n=name, _o=original, **k):
+                seen.append(_n)
+                return _o(*a, **k)
+            setattr(m, name, spy)
+        hub_loader.feed(m, ch)
+        return seen
+
+    def test_training_letters_reach_their_handlers(self):
+        expected = {
+            "R": "do_record_move",
+            "L": "do_read_sensors",
+            "C": "do_print_program",
+            "F": "do_find_line_point",
+            "T": "do_follow_line_seg",
+            "U": "do_undo",
+        }
+        for ch, fn in expected.items():
+            with self.subTest(cmd=ch):
+                m = self._hub()
+                self.assertEqual(self._called(m, ch), [fn])
+
+    def test_each_training_letter_is_ignored_when_unknown(self):
+        # الحروف غير المعروفة لا تنفّذ أي شيء ولا تُنتج أثرًا
+        m = self._hub()
+        self.assertEqual(self._called(m, "Z"), [])
+        self.assertEqual(m.actions, [])
+
+    def test_remote_letters_map_to_drive(self):
+        cases = {"w": (1, 0), "s": (-1, 0), "a": (0, -1), "d": (0, 1)}
+        for ch, (sgn_speed, sgn_turn) in cases.items():
+            with self.subTest(cmd=ch):
+                m = self._hub()
+                hub_loader.feed(m, ch)
+                self.assertTrue(m.rc_driving, "لم يبدأ الدفع عن بعد")
+                self.assertEqual(m.rc_target_speed, sgn_speed * m.RC_SPEED)
+                self.assertEqual(m.rc_target_turn, sgn_turn * m.RC_TURN)
+
+    def test_x_stops_and_releases_motors(self):
+        m = self._hub()
+        hub_loader.feed(m, "w")
+        self.assertTrue(m.rc_driving)
+        hub_loader.feed(m, "x")
+        # x = إيقاف ناعم: يُصفّر الهدف فورًا، ثم تُحرَّر المحركات في الدورات التالية
+        self.assertEqual(m.rc_target_speed, 0)
+        self.assertEqual(m.rc_target_turn, 0)
+        for _ in range(4):
+            m.rc_tick()
+        self.assertFalse(m.rc_driving, "لم تُحرَّر المحركات بعد الإيقاف")
+
+    def test_training_command_halts_remote_driving_first(self):
+        m = self._hub()
+        hub_loader.feed(m, "w")
+        self.assertTrue(m.rc_driving)
+        self._called(m, "R")
+        self.assertFalse(m.rc_driving, "لم يتوقف الدفع قبل التسجيل")
+
+    def test_ping_answers_with_version_and_memory(self):
+        m = self._hub()
+        _, out = capture(hub_loader.feed, m, "?")
+        self.assertIn("# ✓ HUB_ALIVE v" + m.HUB_VERSION, out)
+        self.assertRegex(out.strip(), r"^# ✓ HUB_ALIVE v\d+ \d+ \d+$")
+
+    def test_auto_read_letters_toggle_stream(self):
+        m = self._hub()
+        hub_loader.feed(m, "y")
+        self.assertTrue(m.AUTO_STREAM)
+        hub_loader.feed(m, "z")
+        self.assertFalse(m.AUTO_STREAM)
+
+    def test_letters_not_swallowed_during_code_receive(self):
+        # أثناء استلام الكود تُعالَج الحروف كبيانات، وبعد E يعود التدريب
+        m = self._hub()
+        hub_loader.feed(m, "K")
+        self.assertTrue(m.code_mode)
+        hub_loader.feed(m, "S 10\nE")
+        self.assertFalse(m.code_mode)
+        self.assertEqual(self._called(m, "R"), ["do_record_move"])
+
+
 class RecordingTests(unittest.TestCase):
     def test_action_limit_keeps_tracking_point(self):
         m = hub_loader.load_app()

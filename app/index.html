@@ -166,6 +166,7 @@
     <span class="dot" id="dot"></span>
     <span id="statusText">غير متصل بالروبوت</span>
     <span id="counter">المسجّل: <b id="count">0</b></span>
+    <span id="hubState" title="هل يرد برنامج التدريب على أوامر التطبيق؟">الـ Hub: —</span>
   </div>
   <div class="warn" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center" id="diagBox" hidden>
     <span>وضع الاتصال: <b id="diagMode">—</b></span>
@@ -403,6 +404,41 @@ function updateDiag() {
 }
 
 let device = null, cmdChar = null, nusRx = null, mode = null; // mode: "pybricks" | "nus"
+// هل يرد برنامج التدريب على الـ Hub؟ (null = لم يُفحص بعد)
+let hubAlive = null;
+
+function setHubState(alive) {
+  hubAlive = alive;
+  const el = $("hubState");
+  if (!el) return;
+  el.textContent = alive === null ? "الـ Hub: —" : (alive ? "الـ Hub: يستجيب ✓" : "الـ Hub: لا يستجيب ✗");
+  el.style.color = alive === null ? "var(--muted)" : (alive ? "#86efac" : "#fca5a5");
+  el.style.fontSize = "13px";
+  el.style.whiteSpace = "nowrap";
+  el.title = alive
+    ? "برنامج التدريب يعمل ويستقبل أوامر التطبيق"
+    : "لم يرد الـ Hub على فحص الاتصال — تأكد أن as3_app.py (v6) يعمل عليه";
+}
+
+// فحص استجابة الـ Hub: يرسل «؟» وينتظر # ✓ HUB_ALIVE.
+// هذه أهم حماية من «لا يحدث شيء»: بدونها لا يعرف المستخدم أن الأمر وصل أصلًا.
+async function pingHub(quiet) {
+  if (!mode) { setHubState(false); return false; }
+  const from = inboxSeq;
+  sendCmd("?");
+  const ack = await waitForLine(/# ✓ HUB_ALIVE/, 1500);
+  if (!ack) {
+    setHubState(false);
+    if (!quiet) {
+      showToast("✗ لا يستجيب الـ Hub — تأكد أن as3_app.py v6 يعمل عليه"
+        + " (اضغط «▶ تشغيل برنامج التدريب») وأن النسخة قديمة لا تعمل الآن", "err", 9000);
+    }
+    return false;
+  }
+  setHubState(true);
+  if (!quiet) showToast("✓ الـ Hub يستجيب: " + ack[0].replace(/^#\s*✓\s*/, ""), "ok", 4000);
+  return true;
+}
 let writeChain = Promise.resolve();
 let recorded = 0;
 const decoder = new TextDecoder("utf-8");
@@ -610,6 +646,7 @@ async function connect(anyDevice) {
       mode = "nus";
     }
     setConnectedUI(true);
+    setTimeout(() => pingHub(true), 800);   // هل يعمل برنامج التدريب فعلًا؟
     setStatus("متصل بـ " + (device.name || "Hub") + (mode === "nus"
       ? " — شغّل برنامج التدريب من زر الـ Hub نفسه"
       : " — اضغط «تشغيل برنامج التدريب» أو شغّله من الـ Hub"), "on");
@@ -629,6 +666,7 @@ function onDisconnected() {
   stopHeartbeat(true);
   releaseWakeLock();
   mode = null; cmdChar = null; nusRx = null;
+  setHubState(null);
   rcStop(true); // لا نرسل x بعد قطع الاتصال
   setConnectedUI(false);
   setStatus("انقطع الاتصال بالروبوت", "");
@@ -732,7 +770,15 @@ function sendAndShow(ch) {
   }
   if (rcActive !== null) rcStop(true); // أي أمر تدريب يوقف الدفع عن بعد فورًا
   showToast("⏳ " + (CMD_LABELS[ch] || ch));
-  return sendCmd(ch);
+  const sent = sendCmd(ch);
+  // إن كان الـ Hub قد كُشف سابقًا كغير مستجيب، نقول ذلك صريحًا بدل الصمت
+  if (hubAlive === false) {
+    showToast("⚠ أُرسل «" + (CMD_LABELS[ch] || ch) + "» لكن الـ Hub لا يستجيب —"
+      + " شغّل as3_app.py v6 عليه («▶ تشغيل برنامج التدريب»)", "err", 7000);
+  } else if (hubAlive === null) {
+    setTimeout(() => pingHub(true), 600);          // فحص صامت في الخلفية
+  }
+  return sent;
 }
 
 // ===== التحكم عن بعد: اضغط مع الاستمرار =====
@@ -825,7 +871,9 @@ document.addEventListener("keydown", e => {
   // مفتاح المسافة = إيقاف فوري (للأمان يبقى متاحًا حتى مع حقل مفتوح،
   // لكنه لا يمنع الكتابة داخله)
   if (e.code === "Space") {
-    if (!isTyping(e.target)) e.preventDefault();
+    // داخل حقل كتابة: المسافة حرف عادي — لا تُرسل «x» للروبوت مع كل فراغ
+    if (isTyping(e.target)) return;
+    e.preventDefault();
     rcStop();
     return;
   }
@@ -849,7 +897,14 @@ $("btnConnect").onclick = () => connect(false);
 $("btnConnectAny").onclick = () => connect(true);
 $("btnDisconnect").onclick = () => device && device.gatt.connected && device.gatt.disconnect();
 $("btnReconnect").onclick = () => reconnect();
-$("btnStart").onclick = () => { sendHubCommand(CMD_START_PROGRAM); showToast("▶ أُرسل أمر تشغيل برنامج التدريب — انتظر APP_READY من الروبوت", "", 3500); updateDiag(); };
+$("btnStart").onclick = () => {
+  sendHubCommand(CMD_START_PROGRAM);
+  showToast("▶ أُرسل أمر تشغيل برنامج التدريب — انتظر APP_READY من الروبوت", "", 3500);
+  updateDiag();
+  // التحقق من أن البرنامج بدأ فعلًا: إن لم يرد، نُخبر المستخدم بالسبب
+  setHubState(null);
+  setTimeout(() => pingHub(false), 1500);
+};
 $("btnStop").onclick = () => { rcStop(true); sendHubCommand(CMD_STOP_PROGRAM); showToast("⏹ أُرسل أمر إيقاف البرنامج"); updateDiag(); };
 
 // أزرار التدريب: النقر عليها أو المفاتيح R L F T U C (انظر مستمع keydown أعلاه)
@@ -1580,6 +1635,9 @@ $("codeEditor").addEventListener("keydown", e => {
   el.selectionStart = el.selectionEnd = at + 2;
   updateGutter();
 });
+$("hubState").style.cursor = "pointer";
+$("hubState").onclick = () => pingHub(false);
+
 $("btnCheckCode").onclick = () => {
   const r = checkProgram(editorText());
   showReport(r);

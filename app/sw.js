@@ -10,7 +10,7 @@
    إصدار كشبكة أمان ثانية.
 */
 
-const CACHE = "consolereader-v6";
+const CACHE = "consolereader-v7";
 
 const ASSETS = [
   "./",

@@ -75,6 +75,16 @@ check("الحذف يفرّغ المكتبة", JSON.parse(w.localStorage.getItem(
 // حماية: لا إرسال بلا اتصال
 check("إرسال المحرّر معطّل بلا اتصال", d.getElementById("btnEditorSend").disabled === true);
 
+// شارة استجابة الـ Hub موجودة وتبدأ بحالة «لم يُفحص»
+check("شارة الـ Hub موجودة", d.getElementById("hubState").textContent.includes("—"),
+  d.getElementById("hubState").textContent);
+
+// ضغط زر تدريب بلا اتصال = رسالة واضحة (وليس صمتًا)
+d.querySelector('.train[data-cmd="R"]').click();
+const toast = d.getElementById("toast");
+check("زر R بلا اتصال يُظهر رسالة", toast.hidden === false && /غير متصل/.test(toast.textContent),
+  toast.textContent.slice(0, 60));
+
 // Tab يُدخل مسافتين بدل نقل التركيز
 ed.value = "robot"; ed.selectionStart = ed.selectionEnd = 5;
 ed.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));

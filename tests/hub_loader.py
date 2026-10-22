@@ -31,7 +31,25 @@ def load_hub_module(filename, marker="# 6) البرنامج الرئيسي"):
     module = types.ModuleType(os.path.splitext(filename)[0])
     module.__dict__["__name__"] = "hub_under_test"
     exec(compile(_cut_before_main(src, marker), path, "exec"), module.__dict__)
+    # MicroPython يوفّر gc.mem_free() — بايثون العادي لا يوفّرها.
+    # نُبدّل الوحدة داخل الوحدة المحمَّلة حتى تعمل سطور التشخيص كما على الـ Hub.
+    module.__dict__["gc"] = FakeGc()
     return module
+
+
+class FakeGc:
+    """بديل ``gc`` بسلوك MicroPython (mem_free) للاختبار على الكمبيوتر."""
+
+    free = 20000
+
+    def mem_free(self):
+        return self.free
+
+    def mem_alloc(self):
+        return 0
+
+    def collect(self):
+        return None
 
 
 def load_app():

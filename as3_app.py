@@ -1194,6 +1194,12 @@ def handle_app_command(cmd):
     if cmd == "G":
         run_start()
         return
+    if cmd == "?":
+        # نبضة تشخيص: تُخبر التطبيق أن برنامج التدريب يعمل ويقرأ الأوامر.
+        # بدونها لا يستطيع التطبيق التمييز بين «أمر لم يُنفَّذ» و«لا أحد يسمع».
+        print("# ✓ HUB_ALIVE v" + HUB_VERSION + " " + str(len(run_queue)) + " " + str(gc.mem_free()))
+        hub.speaker.beep(1200, 40)
+        return
     if cmd == "V":
         # قائمة البرامج المحفوظة على الـ Hub بلا وسيط
         store_list()
@@ -1229,6 +1235,39 @@ def handle_app_command(cmd):
         print("# القراءة التلقائية للحساسات: متوقفة")
         hub.speaker.beep(500, 60)
         return
+
+    # --- التحكم عن بعد بالمحركات (الأسهم في التطبيق) ---
+    #   ملاحظة: القيمة الموجبة لمعدّل الدوران تعني يمينًا (مع عقارب الساعة).
+    if cmd == "w":                       # للأمام
+        rc_drive(RC_SPEED, 0)
+        return
+    if cmd == "s":                       # للخلف
+        rc_drive(-RC_SPEED, 0)
+        return
+    if cmd == "a":                       # لف يسارًا  (عكس عقارب الساعة)
+        rc_drive(0, -RC_TURN)
+        return
+    if cmd == "d":                       # لف يمينًا  (مع عقارب الساعة)
+        rc_drive(0, RC_TURN)
+        return
+
+    # --- أي أمر تدريب: أوقف الدفع عن بعد بنعومة حتى لا تتداخل الحركتان ---
+    if rc_driving:
+        rc_halt_and_wait()
+
+    if cmd == "R":
+        do_record_move()
+    elif cmd == "L":
+        do_read_sensors()
+    elif cmd == "C":
+        do_print_program()
+    elif cmd == "F":
+        do_find_line_point()
+    elif cmd == "T":
+        do_follow_line_seg()
+    elif cmd == "U":
+        do_undo()
+    # أي حرف آخر (مسافات، أسطر جديدة…) يُتجاهل
 
 # =========================================================
 # 6) البرنامج الرئيسي: توليد كود ذكي من التدريب
