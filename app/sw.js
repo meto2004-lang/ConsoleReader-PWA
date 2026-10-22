@@ -1,8 +1,16 @@
 /* ConsoleReader — Service Worker
    الهدف: أن تفتح الصفحة في الميدان حتى بلا إنترنت، وتتحدّث تلقائيًا عند توفر اتصال.
-   كل المسارات نسبية لأن الصفحة قد تُقدَّم من مسار فرعي (GitHub Pages: /<repo>/app/). */
+   كل المسارات نسبية لأن الصفحة قد تُقدَّم من مسار فرعي (GitHub Pages: /<repo>/app/).
 
-const CACHE = "consolereader-v2";
+   ملاحظة مهمة (خطأ سابق): طلبات التنقّل (navigate) تُخدَم من النسخة المخزّنة
+   تحت "./index.html"، بينما كان التحديث يُكتب تحت عنوان الطلب نفسه ("/app/").
+   النتيجة أن نسخة الصفحة المخزّنة لم تُستبدل أبدًا، فبقي المستخدمون المثبَّتون
+   على نسخة قديمة مهما رُفع تحديث — ما لم يتغيّر هذا الملف نفسه.
+   الحل: كل تنقّل يحدّث أيضًا مفتاح "./index.html"، مع ترقية اسم الذاكرة في كل
+   إصدار كشبكة أمان ثانية.
+*/
+
+const CACHE = "consolereader-v9";
 
 const ASSETS = [
   "./",
@@ -37,19 +45,26 @@ self.addEventListener("activate", (e) => {
    طلبات التنقّل تُخدم بصفحة التطبيق دائمًا — حتى لو طُلب مسار غير موجود. */
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
-  const cachedKey = e.request.mode === "navigate" ? "./index.html" : e.request;
-  e.respondWith(respond(cachedKey, e.request));
+  const isNavigate = e.request.mode === "navigate";
+  const cachedKey = isNavigate ? "./index.html" : e.request;
+  e.respondWith(respond(cachedKey, e.request, isNavigate));
 });
 
-async function respond(cachedKey, original) {
+async function respond(cachedKey, original, isNavigate) {
   const cached = await caches.match(cachedKey, { ignoreSearch: true });
 
   // يبدأ التحديث في الخلفية دون انتظار — فلا يؤخّر العرض.
   const updating = fetch(original)
     .then((res) => {
       if (res && res.status === 200 && res.type === "basic") {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(original, copy)).catch(() => {});
+        if (isNavigate) {
+          // الصفحة نفسها: نحدّث المفتاح الذي يُخدَم منه التنقّل، وإلا بقي
+          // المستخدم على نسخة قديمة للأبد (انظر الملاحظة في أعلى الملف).
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put("./index.html", copy)).catch(() => {});
+        }
+        const copy2 = res.clone();
+        caches.open(CACHE).then((c) => c.put(original, copy2)).catch(() => {});
       }
       return res;
     })

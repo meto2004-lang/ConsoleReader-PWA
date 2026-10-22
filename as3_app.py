@@ -4,8 +4,16 @@
 # أوامر التطبيق (حرف واحد): R=تسجيل حركة، L=قراءة حساسات، C=طباعة البرنامج،
 # F=نقطة خط ذكية، T=متابعة خط، U=تراجع.
 # التحكم عن بعد (أزرار الأسهم): w=للأمام s=للخلف a=لف يسارًا d=لف يمينًا x=إيقاف.
-# إرسال الكود من التطبيق: K=بدء الاستلام ثم أسطر الكود ثم E=انتهى،
-#   و G=نفّذ الكود المستلم الآن، و x=إيقاف التنفيذ.
+# إرسال الكود من التطبيق: B=بدء الاستلام بالحزم ثم حزم N (بايتان طول + بيانات)
+#   ثم E=انتهى، و G=نفّذ الكود المستلم الآن، و x=إيقاف التنفيذ.
+#   (الوضع القديم K … أسطر … E ما زال مدعومًا.)
+# نبضة الحياة أثناء التنفيذ: p=نبضة (تفعّل المراقب)، q=أوقفه (يُستخدم عند
+#   إخفاء الصفحة كي لا تتوقف بسبب تقييد مؤقتات المتصفح).
+# عتاة الخط من التطبيق: H ثم الرقم ثم سطر جديد (مثال: "H 49\n").
+# نسخة الـ Hub تُطبع عند البدء: HUB_VERSION
+# مكتبة برامج على الـ Hub (v6): W <اسم> = احفظ البرنامج المستلم، V = اعرض القائمة،
+#   J <رقم> = شغّل برنامجًا محفوظًا، D <رقم> = احذفه. التخزين في RAM (تُفقد
+#   البرامج بإعادة تشغيل الـ Hub) — النسخة الدائمة في مكتبة التطبيق.
 
 from pybricks.hubs import PrimeHub
 from pybricks.pupdevices import Motor, ColorSensor
@@ -17,6 +25,9 @@ from pybricks.tools import wait, StopWatch
 from usys import stdin
 from uselect import poll
 
+# لقياس الذاكرة الحرة عند البدء (تشخيص فقط)
+import gc
+
 # =========================================================
 # 1) المنافذ حسب روبوتك
 # =========================================================
@@ -25,8 +36,13 @@ hub = PrimeHub()
 left_motor  = Motor(Port.A, Direction.COUNTERCLOCKWISE)  # عدّل الاتجاه إذا لزم
 right_motor = Motor(Port.B)
 
-left_sensor  = ColorSensor(Port.C)   # حساس الشمال
-right_sensor = ColorSensor(Port.D)   # حساس اليمين
+# حساس ألوان واحد فقط، مركّب على المنفذ C.
+#   كل القراءات (عتبة الخط، البحث عن الخط، المحاذاة، متابعة الحافة) تعتمد
+#   على هذا الحسّاس وحده — لا يوجد حسّاس على D. غيّر LINE_PORT فقط إن كان
+#   الحسّاس في منفذ آخر.
+LINE_PORT        = Port.C
+LINE_PORT_LETTER = "C"          # نفس المنفذ أعلاه — يُطبع في البرنامج الناتج
+line_sensor = ColorSensor(LINE_PORT)
 
 # =========================================================
 # 2) أبعاد الروبوت (عدّلها لاحقاً للمعايرة الدقيقة)
@@ -37,6 +53,9 @@ AXLE_TRACK     = 110
 robot = DriveBase(left_motor, right_motor, WHEEL_DIAMETER, AXLE_TRACK)
 robot.use_gyro(True)  # نفس إعداد برنامج السباق (جيرو مفعّل)
 
+# إصدار برنامج الـ Hub — يظهر في سجل التطبيق ليعرف المستخدم أن النسخة محدَّثة
+HUB_VERSION = "6"
+
 # عتبات دنيا تتجاهل اهتزاز اليد
 MIN_DIST = 5  # أقل من 5 مم = ضجيج
 MIN_ANG  = 2  # أقل من درجتين = ضجيج
@@ -46,6 +65,15 @@ SEARCH_MARGIN = 50   # هامش بحث إضافي بعد المسافة المج
 MIN_SEARCH    = 80   # أدنى مسافة بحث عن الخط
 FOLLOW_GAIN   = 2.5  # معامل التحكم P لمتابعة الخط
 ALIGN_SPEED   = 25   # سرعة الدوران للمحاذاة (deg/s)
+
+# بالحسّاس الواحد لا يمكن استنتاج «أي حافة» نتبع من مقارنة حساسين،
+# فالجانب يُثبَّت هنا: "L" يصحّح نحو اليسار، "R" نحو اليمين.
+# اقلبه إذا كان الروبوت يبتعد عن الخط بدل أن يلتصق بحافته.
+FOLLOW_SIDE   = "L"
+
+# تسارع الحركات في برنامج السباق الناتج (نعومة أثناء التشغيل)
+MOVE_ACCEL      = 1200
+MOVE_TURN_ACCEL = 1500
 
 # =========================================================
 # 3) سجلات التدريب
@@ -59,8 +87,34 @@ ALIGN_SPEED   = 25   # سرعة الدوران للمحاذاة (deg/s)
 # حفظ "المرجع السابق" داخل العنصر يسمح للتراجع بإعادته بدقة.
 actions = []
 
-# كل قياسات الانعكاس (لحساب عتاة الخط تلقائياً)
-refl_samples = []
+# نطاق الانعكاس (أظلم وأفتح قياس) لحساب عتاة الخط تلقائيًا.
+#   في السابق كانت تُخزَّن كل العينات في قائمة (حتى 400 عنصر ≈ 3.2KB)،
+#   وذاكرة الـ Hub ضيقة جدًا. لا نحتاج لحساب العتبة إلا أصغر قيمة وأكبرها،
+#   فحفظهما فقط يوفّر الذاكرة ويُلغي كلفة pop(0) في كل قراءة.
+class SampleRange:
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.lo = 101      # أظلم قياس (الخط) — 101 أكبر من أي انعكاس ممكن
+        self.hi = -1       # أفتح قياس (الخلفية)
+        self.n  = 0        # عدد العينات (للتشخيص)
+
+    def add(self, v):
+        if v < self.lo:
+            self.lo = v
+        if v > self.hi:
+            self.hi = v
+        self.n += 1
+
+    def ok(self):
+        # نحتاج عيّنتين على الأقل وباينًا واضحًا بين الخط والخلفية
+        return self.n >= 2 and self.hi >= 0 and self.hi - self.lo >= 25
+
+    def span(self):
+        return (self.hi - self.lo) if self.n else 0
+
+refl = SampleRange()
 
 # =========================================================
 # 4) دوال مساعدة
@@ -70,7 +124,7 @@ def wait_for_release():
         wait(10)
 
 def setup_lines(include_sensors):
-    # مقدمة البرنامج الناتج. تُضاف تهيئة الحساسين إذا سُجّلت قراءات أو نقاط ذكية،
+    # مقدمة البرنامج الناتج. تُضاف تهيئة الحسّاس (الوحيد) إذا سُجّلت قراءات أو نقاط ذكية،
     # حتى لا يفشل برنامج السباق عند تشغيله بدون حساسات.
     lines = [
         "from pybricks.hubs import PrimeHub",
@@ -84,9 +138,9 @@ def setup_lines(include_sensors):
         "right_motor = Motor(Port.B)",
     ]
     if include_sensors:
+        # حساس واحد فقط (المنفذ C) — نفس إعداد نسخة الـ Hub
         lines += [
-            "left_sensor  = ColorSensor(Port.C)",
-            "right_sensor = ColorSensor(Port.D)",
+            "line_sensor = ColorSensor(Port." + LINE_PORT_LETTER + ")  # الحسّاس الوحيد",
         ]
     lines += [
         "robot = DriveBase(left_motor, right_motor, " + str(WHEEL_DIAMETER) + ", " + str(AXLE_TRACK) + ")",
@@ -100,20 +154,18 @@ def setup_lines(include_sensors):
 
 def estimated_threshold():
     # عتاة الخط = منتصف المسافة بين أفتح قياس (خلفية) وأظلم قياس (خط)
-    if len(refl_samples) >= 2:
-        lo, hi = min(refl_samples), max(refl_samples)
-        if hi - lo >= 20:
-            return (hi + lo) // 2
+    if refl.ok():
+        return (refl.hi + refl.lo) // 2
     return None
 
 def smart_helpers_lines():
     # دوال التصحيح الذكي تُدرج في البرنامج الناتج عند وجود نقاط ذكية.
     #
     # ملاحظة ذاكرة (سبب الخطأ السابق):
-    #   كانت هذه الدالة تحتفظ بقالب واحد كبير (~1.6KB) كثابت في الكود،
+    #   كانت هذه الدالة تحتفظ بقالب واحد كبير (~1.5KB) كثابت في الكود،
     #   ثم تستدعي str.replace() ثلاث مرات — وكل استدعاء يخصّص نسخة كاملة
-    #   جديدة من القالب. ذاكرة الهاب في PrimeHub محدودة جدًا، فكان يفشل
-    #   الطلب بـ MemoryError: "allocating 1569 bytes" وينتهي البرنامج كله.
+    #   جديدة منه. ذاكرة الهاب في PrimeHub محدودة جدًا، فيفشل الطلب بـ
+    #   MemoryError: "allocating 1569 bytes" وينتهي البرنامج كله.
     #   الحل: نبني الأسطر كقوائم نصوص قصيرة تُخصَّص واحدة واحدة، بلا قالب
     #   كبير وبلا replace — ولن يُطلب أي كتلة كبيرة مرة أخرى.
     th = estimated_threshold()
@@ -121,17 +173,17 @@ def smart_helpers_lines():
         th_line = "LINE_THRESHOLD = 30  # عتاة الخط - عايِرها: قِس فوق الخط وفوق الخلفية بزر LEFT"
     else:
         th_line = ("LINE_THRESHOLD = " + str(th) + "  # محسوبة من قياساتك"
-                   + " (الخط ≈ " + str(min(refl_samples)) + "، الخلفية ≈ " + str(max(refl_samples)) + ")")
+                   + " (الخط ≈ " + str(refl.lo) + "، الخلفية ≈ " + str(refl.hi) + ")")
     return [
-        "# --- دوال التصحيح الذكي بالحساسات ---",
+        "# --- دوال التصحيح الذكي بالحسّاس الواحد ---",
         th_line,
         "",
         "def find_line(direction=1, max_dist=250, speed=80):",
-        "    # يتحرك ببطء حتى يكشف أحد الحساسين خطاً ثم يتوقف (أدقّ من المسار المفتوح)",
+        "    # يتحرك ببطء حتى يكشف الحسّاس خطاً ثم يتوقف (أدقّ من المسار المفتوح)",
         "    robot.reset()",
         "    robot.drive(direction * speed, 0)",
         "    while abs(robot.distance()) < max_dist:",
-        "        if left_sensor.reflection() < LINE_THRESHOLD or right_sensor.reflection() < LINE_THRESHOLD:",
+        "        if line_sensor.reflection() < LINE_THRESHOLD:",
         "            robot.stop()",
         "            return True",
         "        wait(10)",
@@ -139,11 +191,12 @@ def smart_helpers_lines():
         "    return False",
         "",
         "def align_on_line(speed=" + str(ALIGN_SPEED) + ", max_angle=45):",
-        "    # يدور في مكانه حتى يستوي كلا الحساسين فوق الخط (تصحيح الاتجاه)",
+        "    # يدور في مكانه حتى يرى الحسّاس الخط (بحث بالدوران)، ثم يتوقف",
+        "    # إن كان الحسّاس فوق الخط أصلاً يعود فورًا",
         "    robot.reset()",
         "    robot.drive(0, speed)",
         "    while abs(robot.angle()) < max_angle:",
-        "        if left_sensor.reflection() < LINE_THRESHOLD and right_sensor.reflection() < LINE_THRESHOLD:",
+        "        if line_sensor.reflection() < LINE_THRESHOLD:",
         "            robot.stop()",
         "            return True",
         "        wait(10)",
@@ -151,13 +204,15 @@ def smart_helpers_lines():
         "    return False",
         "",
         'def follow_line(dist, side="L", speed=90):',
-        "    # يتبع حافة الخط بتحكم P لمسافة dist مم (side = الحساس الذي يتبع الحافة)",
-        '    s = left_sensor if side == "L" else right_sensor',
+        "    # يتبع حافة الخط بالحسّاس الواحد بتحكم P لمسافة dist مم",
+        '    # side = اتجاه التصحيح: "L" نحو اليسار، "R" نحو اليمين',
+        "    # المسافة السالبة = متابعة الخط أثناء الرجوع للخلف",
         '    sign = 1 if side == "L" else -1',
+        '    spd = speed if dist >= 0 else -speed',
         "    robot.reset()",
-        "    while robot.distance() < dist:",
-        "        error = s.reflection() - LINE_THRESHOLD",
-        "        robot.drive(speed, sign * (" + str(FOLLOW_GAIN) + ") * error)",
+        "    while abs(robot.distance()) < abs(dist):",
+        "        error = line_sensor.reflection() - LINE_THRESHOLD",
+        "        robot.drive(spd, sign * (" + str(FOLLOW_GAIN) + ") * error)",
         "        wait(10)",
         "    robot.stop()",
     ]
@@ -175,6 +230,7 @@ def format_seg(seg):
         return "align_on_line(" + str(val) + ")"
     if kind == "follow_line":
         dist, side = val
+        # نطبع الإشارة كما هي: المسافة السالبة = متابعة الخط أثناء الرجوع
         return "follow_line(" + str(dist) + ', "' + side + '")'
     return "# ? " + str(kind) + "=" + str(val)
 
@@ -244,8 +300,9 @@ def print_full_program():
             if kind == "sensor":
                 for line in content:
                     print(line)
-        if refl_samples:
-            print("# عيّنات الانعكاس: الأقل=" + str(min(refl_samples)) + "، الأعلى=" + str(max(refl_samples)))
+        if refl.n:
+            print("# نطاق الانعكاس: الأقل=" + str(refl.lo) + "، الأعلى=" + str(refl.hi)
+                  + " (" + str(refl.n) + " عينة)")
             th = estimated_threshold()
             if th is not None:
                 print("# عتاة الخط المقترحة = " + str(th))
@@ -409,13 +466,34 @@ RUN_TOL_DIST     = 4      # مم     — سماحية الوصول للمساف�
 RUN_TOL_ANG      = 2      # درجة   — سماحية الوصول للزاوية
 RUN_ALIGN_MAX    = 45     # درجة   — أقصى دوران لمحاذاة الخط
 RUN_MAX_MS       = 120000 # أمان: أقصى مدة تنفيذ، يُلغى بعدها تلقائيًا
-RUN_MAX_LINES    = 160    # أقصى عدد أوامر يُستلم من التطبيق
-RUN_MAX_LINE_LEN = 40     # أقصى طول سطر مستلم (حماية للذاكرة)
+RUN_MAX_LINES    = 90     # أقصى عدد أوامر يُستلم من التطبيق (ذاكرة الـ Hub)
+RUN_MAX_LINE_LEN = 24     # أقصى طول سطر مستلم (أطول سطر مدعوم ≈ 12 حرفًا)
+HEARTBEAT_MS     = 2500   # نبضة حياة التطبيق: بلا نبضة خلالها يُلغى التنفيذ
+CODE_TIMEOUT_MS  = 5000   # مهلة استلام الكود: بلا حرف خلالها نخرج من وضع الاستلام
+FRAME_MAX        = 90     # أقصى حمولة في حزمة N (أقل من حدّ خاصية BLE = 100)
+TH_MIN           = 5      # أقل عتاة خط مقبولة (H من التطبيق)
+TH_MAX           = 95     # أعلى عتاة خط مقبولة
 
 code_mode    = False  # هل نحن في منتصف استلام الكود؟
 code_line    = ""     # السطر الجاري تجميعه
+code_bad     = False  # هل تجاوز السطر الجاري الحد؟ (يُتجاهل كاملًا)
 code_new     = []     # المقاطع المستلمة (تُبنى سطرًا بسطر لتوفير الذاكرة)
 code_skipped = 0      # أسطر لم تُفهم أو تجاوزت الحد
+code_bulk    = False  # هل الاستلام بحزم N (طريقة التطبيق السريعة)؟
+code_single  = False  # أمر إعداد من سطر واحد (H) — يخرج من الاستلام بعد السطر
+bulk_hdr     = -1     # -1 = بين الحزم، 0/1 = عدد بايتات الطول المستلمة
+bulk_left    = 0      # عدد أحرف الحمولة المتبقية في الحزمة الحالية
+PROG_NAME_MAX    = 20     # أقصى طول اسم برنامج محفوظ على الهاب
+MAX_PROGRAMS     = 4      # أقصى عدد برامج محفوظة في RAM (ذاكرة الهاب ضيقة)
+
+programs   = []   # [[الاسم, المقاطع], …] — المقاطع نفسها التي تُنفَّذ
+single_cmd = ""   # بادئة أمر أحادي السطر: "H" | "W" | "J" | "D"
+
+code_watch   = StopWatch()   # لقياس مهل الاستلام
+
+run_watch    = StopWatch()   # مدة التنفيذ الكلية
+beat_watch   = StopWatch()   # آخر نبضة حياة من التطبيق
+beat_on      = False         # هل التطبيق يرسل نبضات الآن؟
 
 run_queue  = []      # الأوامر الجاهزة للتنفيذ (مقاطع)
 run_active = False   # هل يجري تنفيذ الكود الآن؟
@@ -426,7 +504,8 @@ run_goal_h = 0       # هدف الزاوية للمقطع الحالي
 run_base_d = 0       # مسافة البداية للمقطع الحالي
 run_base_h = 0       # زاوية البداية للمقطع الحالي
 run_th     = 30      # عتاة الخط المستخدمة أثناء التنفيذ
-run_watch  = StopWatch()
+th_pinned  = None    # عتبة وصلت من التطبيق (H) — تُقدَّم على المحسوبة
+run_speed  = RUN_FOLLOW_SPEED   # سرعة متابعة الخط أثناء التنفيذ
 
 def _clamp(v, lo, hi):
     if v < lo:
@@ -447,7 +526,7 @@ def seg_label(seg):
     if kind == "align_line":
         return "align_on_line(" + str(seg[1]) + ")"
     if kind == "follow_line":
-        return "follow_line(" + str(seg[1]) + ', "' + str(seg[2]) + '")'
+        return "follow_line(" + str(abs(seg[1])) + ', "' + str(seg[2]) + '")'
     return str(kind)
 
 def parse_code_line(line):
@@ -468,17 +547,154 @@ def parse_code_line(line):
         if k == "L" and len(parts) >= 3:
             side = "R" if parts[2].upper()[:1] == "R" else "L"
             return ("follow_line", int(float(parts[1])), side)
+        if k == "H":
+            # عتبة الخط من التطبيق — تُطبَّق فورًا ولا تدخل قائمة التنفيذ
+            return ("threshold", int(float(parts[1])))
     except (ValueError, IndexError):
         return None
     return None
 
+def set_threshold(value):
+    # H <5..95>: عتاة الخط التي يراها المستخدم في اللوحة — تُرسل قبل G
+    # حتى ينفّذ الهاب نفس عتبة الكود المعروض على الشاشة.
+    global run_th, th_pinned
+    if value < TH_MIN:
+        value = TH_MIN
+    if value > TH_MAX:
+        value = TH_MAX
+    run_th = value
+    th_pinned = value
+    print("# عتاة الخط من التطبيق = " + str(run_th))
+    hub.speaker.beep(650, 60)
+
+# ---------------------------------------------------------
+# مكتبة برامج على الـ Hub (v6)
+#
+#   التخزين في RAM: المقاطع نفسها التي يُنفّذها G، بلا نصوص إضافية.
+#   الهدف: تشغيل برنامج محفوظ بلا هاتف (J <رقم>)، والتنقّل بين بدائل
+#   أثناء التجربة. النسخة الدائمة تبقى في مكتبة التطبيق (localStorage)
+#   لأن ذاكرة الـ Hub تُصفَّر عند إعادة التشغيل.
+# ---------------------------------------------------------
+def store_list():
+    # V: قائمة البرامج المحفوظة — بصيغة يفهمها التطبيق
+    print("# V " + str(len(programs)))
+    i = 0
+    for p in programs:
+        print("# P " + str(i) + " " + str(len(p[1])) + " " + p[0])
+        i += 1
+    print("# V end")
+    hub.speaker.beep(700, 80)
+
+def store_save(name):
+    # W <اسم>: احفظ البرنامج المستلم الآن (run_queue) — يستبدل الاسم نفسه
+    if not run_queue:
+        print("# ⚠ لا يوجد برنامج لحفظه — أرسل الكود أولًا")
+        hub.speaker.beep(250, 250)
+        return
+    name = name.strip()[:PROG_NAME_MAX]
+    if not name:
+        name = "برنامج " + str(len(programs) + 1)
+    for p in programs:
+        if p[0] == name:
+            p[1] = run_queue
+            print("# ✓ حُدِّث على الهاب: " + name)
+            hub.speaker.beep(900, 150)
+            return
+    if len(programs) >= MAX_PROGRAMS:
+        print("# ⚠ امتلأت ذاكرة الـ Hub (" + str(MAX_PROGRAMS) + " برامج) — احذف واحدًا: D <رقم>")
+        hub.speaker.beep(250, 250)
+        return
+    programs.append([name, run_queue])
+    print("# ✓ حُفظ على الهاب: " + name + " (" + str(len(programs)) + "/" + str(MAX_PROGRAMS) + ")")
+    hub.speaker.beep(900, 150)
+
+def store_run(idx):
+    # J <رقم>: شغّل برنامجًا محفوظًا (بلا حاجة إلى إعادة إرسال من الهاتف)
+    global run_queue
+    if idx < 0 or idx >= len(programs):
+        print("# ⚠ لا يوجد برنامج بهذا الرقم — اضغط «تحديث قائمة الـ Hub»")
+        hub.speaker.beep(250, 250)
+        return
+    if run_active:
+        run_cancel("تشغيل برنامج محفوظ")
+    run_queue = programs[idx][1]
+    print("# ▶ برنامج محفوظ: " + programs[idx][0])
+    run_start()
+
+def store_del(idx):
+    # D <رقم>: احذف برنامجًا محفوظًا
+    if idx < 0 or idx >= len(programs):
+        print("# ⚠ لا يوجد برنامج بهذا الرقم")
+        hub.speaker.beep(250, 250)
+        return
+    name = programs[idx][0]
+    del programs[idx]
+    print("# ✗ حُذف من الهاب: " + name + " — المتبقي: " + str(len(programs)))
+    hub.speaker.beep(500, 120)
+
+def handle_single(line):
+    # أوامر سطر واحد بأرقام (H/W/J/D): تُستلم مثل H ثم تُنفَّذ فورًا
+    global single_cmd
+    kind = single_cmd
+    single_cmd = ""
+    parts = line.split()
+    arg = parts[1] if len(parts) > 1 else ""
+    if kind == "W":
+        # الاسم قد يحتوي مسافات: كل ما بعد الحرف الأول
+        store_save(line[2:] if len(line) > 2 else "")
+        return
+    if kind == "H":
+        try:
+            set_threshold(int(float(arg)))
+        except (ValueError, IndexError):
+            print("# ⚠ عتاة خط غير صالحة — أُبقيت السابقة")
+            hub.speaker.beep(250, 250)
+        return
+    try:
+        idx = int(float(arg))
+    except (ValueError, IndexError):
+        idx = -1
+    if kind == "J":
+        store_run(idx)
+    elif kind == "D":
+        store_del(idx)
+
+def code_add_char(cmd):
+    # حرف واحد من نص الكود: يجمعه في السطر الجاري أو ينهيه.
+    # تُستخدم في الوضعين: أسطر K…E القديمة، وحزم N الجديدة.
+    global code_line, code_bad, code_mode, code_single
+    if cmd == "\n":
+        code_take_line()
+        if code_single:
+            code_mode = False
+            code_single = False
+    elif cmd == "\r":
+        pass                        # CR من ويندوز — ليس جزءًا من الأمر
+    elif len(code_line) >= RUN_MAX_LINE_LEN:
+        # لا نقصّ السطر (قصّ "S 4000" إلى "S 400" ينفّذ أمرًا خاطئًا):
+        # نعلّمه فاسدًا ونكمل تجاهله حتى نهاية السطر
+        code_bad = True
+    else:
+        code_line += cmd
+
 def code_take_line():
     # ينهي السطر الجاري ويحوّله فورًا إلى مقطع تنفيذ.
     # لا نحتفظ بنصوص الأسطر كلها (ذاكرة الهاب محدودة) بل بالمقاطع فقط.
-    global code_line, code_skipped
+    global code_line, code_bad, code_skipped
     line = code_line
     code_line = ""
     if not line:
+        code_bad = False
+        return
+    if code_single:
+        # أمر أحادي السطر (H/W/J/D): المسار مختلف — لا مقاطع ولا قائمة تنفيذ
+        code_bad = False
+        handle_single(line)
+        return
+    if code_bad:
+        # السطر تجاوز الحد: قد يكون مبتورًا (S 4000 → S 400) فلا ننفّذه أبدًا
+        code_bad = False
+        code_skipped += 1
         return
     if len(code_new) >= RUN_MAX_LINES:
         code_skipped += 1
@@ -486,25 +702,64 @@ def code_take_line():
     seg = parse_code_line(line)
     if seg is None:
         code_skipped += 1
+    elif seg[0] == "threshold":
+        set_threshold(seg[1])      # H رقم — أمر إعداد لا أمر حركة
     else:
         code_new.append(seg)
 
-def code_receive_start():
-    # K: بداية استلام كود جديد (يُلغي التنفيذ الجاري أولًا)
-    global code_mode, code_line, code_new, code_skipped
+def code_receive_start(bulk=False, single=False):
+    # K (أسطر) أو B (حزم): بداية استلام كود جديد — يُلغي التنفيذ الجاري.
+    # single=True لأمر سطر واحد مثل H (عتبة الخط): يخرج من الاستلام تلقائيًا،
+    # وإلا بقي الـ Hub في وضع الاستلام وابتلع أمر G التالي.
+    global code_mode, code_bulk, code_single, bulk_hdr, bulk_left
+    global code_line, code_bad, code_new, code_skipped
     if run_active:
         run_cancel("استلام كود جديد")
     code_mode = True
+    code_bulk = bulk
+    code_single = single
+    bulk_hdr = -1
+    bulk_left = 0
     code_line = ""
+    code_bad = False
     code_new = []
     code_skipped = 0
-    print("# 📥 استلام الكود من التطبيق…")
+    code_watch.reset()
+    if single:
+        pass                      # H: بلا رسالة — يظهر سطر العتبة وحده
+    elif bulk:
+        print("# 📥 استلام الكود من التطبيق (حزم)…")
+    else:
+        print("# 📥 استلام الكود من التطبيق…")
+
+def code_receive_abort(reason):
+    # الخروج الآمن من وضع الاستلام دون لمس الكود السابق في الهاب.
+    # بدون هذه المهلة كان فقدُ حرف واحد يُبقي الهاب يبتلع كل الأوامر
+    # (حتى x) بلا نهاية.
+    global code_mode, code_bulk, code_single, bulk_hdr, bulk_left
+    global code_line, code_new, code_bad
+    code_mode = False
+    code_bulk = False
+    code_single = False
+    bulk_hdr = -1
+    bulk_left = 0
+    code_line = ""
+    code_new = []
+    code_bad = False
+    print("# ⚠ أُلغي استلام الكود — " + reason + " (لم يتغيّر الكود السابق)")
+    hub.speaker.beep(250, 250)
 
 def code_receive_finish():
     # E: نهاية الاستلام — المقاطع المستلمة تصبح قائمة التنفيذ
-    global code_mode, code_new, code_skipped, run_queue
+    global code_mode, code_bulk, code_single, bulk_hdr, bulk_left
+    global code_new, code_skipped, run_queue
     code_take_line()          # آخر سطر إن لم ينتهِ بسطر جديد
     code_mode = False
+    code_bulk = False
+    code_single = False
+    bulk_hdr = -1
+    bulk_left = 0
+    code_watch.reset()
 
     n = len(code_new)
     skipped = code_skipped
@@ -530,16 +785,19 @@ def resync_tracking():
     last_heading = hub.imu.heading()
 
 def _run_end(msg, freq):
-    global run_active
-    robot.stop()
+    # brake وليس stop: التوقف الآمن يجب أن يكبح المحركات فورًا
+    # (stop = coast، أي أن الروبوت قد يتابع مسافة محسوسة بعد الإلغاء).
+    global run_active, beat_on
+    robot.brake()
     run_active = False
+    beat_on = False
     resync_tracking()
     print(msg)
     hub.speaker.beep(freq, 200)
 
 def run_start():
     # G: تنفيذ الكود المستلم الآن
-    global run_active, run_index, run_phase, run_th
+    global run_active, run_index, run_phase, run_th, run_speed, beat_on
     if not run_queue:
         print("# ⚠ لا يوجد كود على الهاب — أرسله من التطبيق أولًا")
         hub.speaker.beep(250, 250)
@@ -550,9 +808,17 @@ def run_start():
     run_active = True
     run_index = 0
     run_phase = "start"
-    run_th = estimated_threshold()
-    if run_th is None:
-        run_th = 30
+    # العتبة: ما أرسله التطبيق (H) أولًا، وإلا المحسوبة من العينات، وإلا 30
+    th = th_pinned
+    if th is None:
+        th = estimated_threshold()
+    if th is None:
+        th = 30
+    run_th = th
+    run_speed = RUN_FOLLOW_SPEED
+    # نبضة الحياة: إن أرسل التطبيق نبضة (p) قبل G نراقبه — ولو انقطع
+    # الاتصال أثناء المسار يتوقف الروبوت خلال HEARTBEAT_MS
+    beat_watch.reset()
     run_watch.reset()
     print("# ▶ بدء تنفيذ الكود (" + str(len(run_queue)) + " أمر) — عتاة الخط = " + str(run_th))
     print("#   للإيقاف: x من التطبيق أو أي زر على الهاب")
@@ -560,7 +826,7 @@ def run_start():
 
 def run_cancel(reason):
     if not run_active:
-        robot.stop()
+        robot.brake()
         return
     _run_end("# ⏹ أُلغي تنفيذ الكود — " + reason, 300)
 
@@ -575,7 +841,7 @@ def _run_step_straight(dist):
         return False
     rem = run_goal_d - robot.distance()
     if abs(rem) <= RUN_TOL_DIST:
-        robot.stop()
+        robot.brake()
         return True
     spd = int(_clamp(abs(rem) * 4, 45, RUN_SPEED))
     robot.drive(spd if rem > 0 else -spd, 0)
@@ -591,7 +857,7 @@ def _run_step_turn(angle):
         return False
     err = run_goal_h - hub.imu.heading()
     if abs(err) <= RUN_TOL_ANG:
-        robot.stop()
+        robot.brake()
         return True
     rate = int(_clamp(abs(err) * 5, 30, RUN_TURN_RATE))
     robot.drive(0, rate if err > 0 else -rate)
@@ -603,11 +869,11 @@ def _run_step_find(direction, max_dist):
         run_base_d = robot.distance()
         run_phase = "go"
         return False
-    if left_sensor.reflection() < run_th or right_sensor.reflection() < run_th:
-        robot.stop()
+    if line_sensor.reflection() < run_th:
+        robot.brake()
         return True
     if abs(robot.distance() - run_base_d) >= max_dist:
-        robot.stop()
+        robot.brake()
         return True
     robot.drive(RUN_SEARCH_SPEED if direction >= 0 else -RUN_SEARCH_SPEED, 0)
     return False
@@ -618,11 +884,11 @@ def _run_step_align(speed):
         run_base_h = hub.imu.heading()
         run_phase = "go"
         return False
-    if left_sensor.reflection() < run_th and right_sensor.reflection() < run_th:
-        robot.stop()
+    if line_sensor.reflection() < run_th:
+        robot.brake()
         return True
     if abs(hub.imu.heading() - run_base_h) >= RUN_ALIGN_MAX:
-        robot.stop()
+        robot.brake()
         return True
     robot.drive(0, speed)
     return False
@@ -633,12 +899,13 @@ def _run_step_follow(dist, side):
         run_base_d = robot.distance()
         run_phase = "go"
         return False
-    if abs(robot.distance() - run_base_d) >= dist:
-        robot.stop()
+    if abs(robot.distance() - run_base_d) >= abs(dist):
+        robot.brake()
         return True
-    s = left_sensor if side == "L" else right_sensor
     sign = 1 if side == "L" else -1
-    robot.drive(RUN_FOLLOW_SPEED, int(sign * FOLLOW_GAIN * (s.reflection() - run_th)))
+    # المسافة السالبة = متابعة الخط أثناء الرجوع للخلف
+    spd = run_speed if dist >= 0 else -run_speed
+    robot.drive(spd, int(sign * FOLLOW_GAIN * (line_sensor.reflection() - run_th)))
     return False
 
 def run_tick():
@@ -648,6 +915,11 @@ def run_tick():
         return
     if run_watch.time() > RUN_MAX_MS:
         run_cancel("تجاوز مدة الأمان")
+        return
+    # نبضة الحياة: التطبيق يرسل p كل ثانية. إن توقفت (خروج من المدى،
+    # إغلاق التبويب، تعليق الجوال) نوقف الروبوت بدل إكمال المسار وحده.
+    if beat_on and beat_watch.time() > HEARTBEAT_MS:
+        run_cancel("انقطاع الاتصال بالتطبيق")
         return
     if run_index >= len(run_queue):
         run_finish()
@@ -683,7 +955,6 @@ def run_tick():
 # ---------------------------------------------------------
 AUTO_SAMPLE_EVERY = 3     # كل 3 دورات ≈ 100ms
 AUTO_STREAM       = True  # بثّ القراءات في السجل أثناء الحركة
-SAMPLE_MAX        = 400   # أقصى عدد عينات محفوظة لحساب العتبة
 MOVE_EPS_DIST     = 8     # مم — أقل من ذلك يُعدّ سكونًا (يد)
 MOVE_EPS_ANG      = 3     # درجة
 
@@ -691,14 +962,13 @@ auto_tick = 0
 watch_d = 0
 watch_h = 0
 
-def sample_sensors():
-    # يقرأ الحساسين ويضيف العينة (الأظلم منهما) لقائمة المعايرة
-    l = left_sensor.reflection()
-    r = right_sensor.reflection()
-    refl_samples.append(min(l, r))
-    while len(refl_samples) > SAMPLE_MAX:
-        refl_samples.pop(0)
-    return l, r
+def sample_sensors(keep):
+    # يقرأ الحسّاس الوحيد، ويضيف العينة لنطاق المعايرة إذا طُلب.
+    # keep=False عند السكون: العيّنة الساكنة (ظلّ يد أو روبوت مرفوع) تُفسد العتبة.
+    v = line_sensor.reflection()
+    if keep:
+        refl.add(v)
+    return v
 
 def auto_read_tick():
     # تُنادى كل دورة من الحلقة الرئيسية؛ تقرأ كل ~100ms
@@ -708,19 +978,33 @@ def auto_read_tick():
         return
     auto_tick = 0
 
-    l, r = sample_sensors()
     d = robot.distance()
     h = hub.imu.heading()
     hand_moved = abs(d - watch_d) >= MOVE_EPS_DIST or abs(h - watch_h) >= MOVE_EPS_ANG
     watch_d = d
     watch_h = h
 
+    v = sample_sensors(hand_moved or rc_driving)
+
     # أثناء تنفيذ الكود لا نبثّ سطر قياس لكل خطوة (لئلا يمتلئ السجل)،
     # فالتطبيق يعرض تقدّم التنفيذ سطرًا لكل مقطع.
     if AUTO_STREAM and not run_active and (rc_driving or hand_moved):
-        # سطر مضغوط: d=المسافة h=الاتجاه L/R=الانعكاس
-        print("# T d=" + str(int(d)) + " h=" + str(int(h))
-              + " L=" + str(l) + " R=" + str(r))
+        # سطر مضغوط: d=المسافة h=الاتجاه C=انعكاس الحسّاس الوحيد
+        print("# T d=" + str(int(d)) + " h=" + str(int(h)) + " C=" + str(v))
+
+MAX_ACTIONS = 60   # أقصى عدد تسجيلات (ذاكرة الـ Hub محدودة)
+
+def push_action(kind, content, prev_dist=None, prev_head=None):
+    # يضيف تسجيلًا مع احترام الحد الأقصى؛ يعيد False إن رُفض.
+    # عند الرفض لا نحرّك نقطة القياس: الحركة تبقى «غير مسجَّلة» فيلتقطها
+    # التسجيل التالي بدل أن تُفقد بصمت.
+    if len(actions) >= MAX_ACTIONS:
+        print("# ⚠ بلغ الحد الأقصى للتسجيلات (" + str(MAX_ACTIONS)
+              + ") — احذف بعضها بـ U ثم أعد المحاولة")
+        hub.speaker.beep(250, 250)
+        return False
+    actions.append((kind, content, prev_dist, prev_head))
+    return True
 
 def do_undo():
     global last_distance, last_heading
@@ -741,16 +1025,15 @@ def do_undo():
 
 def do_find_line_point():
     global last_distance, last_heading
-    # نقطة خط ذكية: تستبدل الحركة منذ آخر تسجيل ببحث دقيق عن الخط،
-    # وتضيف محاذاة إذا كان الحسّاسان فوق الخط الآن.
+    # نقطة خط ذكية: تستبدل الحركة منذ آخر تسجيل ببحث دقيق عن الخط.
+    #   بالحسّاس الواحد لا نضيف محاذاة بعد find_line: فالحسّاس يكون على
+    #   الخط مباشرة بعد البحث، والمحاذاة تصبح بلا أثر (تُرجع فورًا).
     curr_distance = robot.distance()
     curr_heading = hub.imu.heading()
     diff_dist = curr_distance - last_distance
     diff_head = curr_heading - last_heading
 
-    l = left_sensor.reflection()
-    r = right_sensor.reflection()
-    refl_samples.append(min(l, r))
+    refl.add(line_sensor.reflection())
 
     segs = []
     if abs(diff_head) >= MIN_ANG:
@@ -760,18 +1043,12 @@ def do_find_line_point():
     max_dist = max(int(round(abs(diff_dist))) + SEARCH_MARGIN, MIN_SEARCH)
     segs.append(("find_line", (direction, max_dist)))
 
-    th = estimated_threshold()
-    if th is None:
-        th = 30  # نفس القيمة الافتراضية في البرنامج الناتج
-    if l < th and r < th:
-        segs.append(("align_line", ALIGN_SPEED))
-
-    actions.append(("move", segs, last_distance, last_heading))
-    for seg in segs:
-        print(format_seg(seg))
-    last_distance = curr_distance
-    last_heading = curr_heading
-    hub.speaker.beep(500, 80)
+    if push_action("move", segs, last_distance, last_heading):
+        for seg in segs:
+            print(format_seg(seg))
+        last_distance = curr_distance
+        last_heading = curr_heading
+        hub.speaker.beep(500, 80)
 
 def do_follow_line_seg():
     global last_distance, last_heading
@@ -781,25 +1058,24 @@ def do_follow_line_seg():
     diff_dist = curr_distance - last_distance
     diff_head = curr_heading - last_heading
 
-    l = left_sensor.reflection()
-    r = right_sensor.reflection()
-    refl_samples.append(min(l, r))
+    refl.add(line_sensor.reflection())
 
     segs = []
     if abs(diff_head) >= MIN_ANG:
         segs.append(("turn", int(round(diff_head))))
 
     if abs(diff_dist) >= MIN_DIST:
-        side = "L" if l <= r else "R"
-        segs.append(("follow_line", (int(round(abs(diff_dist))), side)))
+        # الجانب من الثابت FOLLOW_SIDE (لا مقارنة حساسين بعد الآن)
+        # نحفظ الإشارة: الدفع للخلف يبقى متابعة خط بالخلف
+        segs.append(("follow_line", (int(round(diff_dist)), FOLLOW_SIDE)))
 
     if segs:
-        actions.append(("move", segs, last_distance, last_heading))
-        for seg in segs:
-            print(format_seg(seg))
-        last_distance = curr_distance
-        last_heading = curr_heading
-        hub.speaker.beep(550, 80)
+        if push_action("move", segs, last_distance, last_heading):
+            for seg in segs:
+                print(format_seg(seg))
+            last_distance = curr_distance
+            last_heading = curr_heading
+            hub.speaker.beep(550, 80)
     else:
         print("# حركة أصغر من العتبة - تم تجاهلها")
 
@@ -825,24 +1101,23 @@ def do_record_move():
 
     if segs:
         # نحفظ المرجع السابق داخل العنصر حتى يستعيده التراجع
-        actions.append(("move", segs, last_distance, last_heading))
-        for seg in segs:
-            print(format_seg(seg))
-        last_distance = curr_distance
-        last_heading = curr_heading
-        if did_turn:
-            hub.speaker.beep(800, 80)
-        if did_straight:
-            hub.speaker.beep(600, 80)
+        if push_action("move", segs, last_distance, last_heading):
+            for seg in segs:
+                print(format_seg(seg))
+            last_distance = curr_distance
+            last_heading = curr_heading
+            if did_turn:
+                hub.speaker.beep(800, 80)
+            if did_straight:
+                hub.speaker.beep(600, 80)
     else:
         print("# حركة أصغر من العتبة - تم تجاهلها")
 
 def do_read_sensors():
-    l_line, l_ref = print_sensor("LEFT sensor (Port.C)", left_sensor)
-    r_line, r_ref = print_sensor("RIGHT sensor (Port.D)", right_sensor)
-    actions.append(("sensor", [l_line, r_line], None, None))
-    refl_samples.append(min(l_ref, r_ref))
-    hub.speaker.beep(750, 80)
+    line, ref = print_sensor("LINE sensor (Port." + LINE_PORT_LETTER + ")", line_sensor)
+    refl.add(ref)
+    if push_action("sensor", [line]):
+        hub.speaker.beep(750, 80)
 
 def do_print_program():
     try:
@@ -859,26 +1134,82 @@ def do_print_program():
 
 def handle_app_command(cmd):
     # حرف واحد من التطبيق = نفس ضغطة الزر المقابلة على الروبوت
-    global AUTO_STREAM, code_mode, code_line
+    global AUTO_STREAM, code_mode, code_line, code_bad, beat_on
 
-    # --- استلام الكود من التطبيق: كل ما بين K و E أسطر نصية ---
+    # --- استلام الكود من التطبيق ---
     if code_mode:
-        if cmd == "\n":
-            code_take_line()
-        elif cmd == "E" and not code_line:
-            # نهاية الإرسال — يصل E في بداية سطر جديد (أي أن السطر السابق اكتمل)
+        code_watch.reset()
+        if code_bulk:
+            # وضع الحزم: N + بايتان طول + حمولة. الأسطر قد تنقسم بين حزمتين.
+            global bulk_hdr, bulk_left
+            if bulk_hdr >= 0:
+                # نجمع طول الحمولة (little-endian) قبل بياناتها
+                if bulk_hdr == 0:
+                    bulk_left = ord(cmd)
+                else:
+                    bulk_left += 256 * ord(cmd)
+                bulk_hdr += 1
+                if bulk_hdr > 1:
+                    bulk_hdr = -1
+                    if bulk_left > FRAME_MAX:
+                        code_receive_abort("حزمة أكبر من الحد")
+                return
+            if bulk_left > 0:
+                code_add_char(cmd)
+                bulk_left -= 1
+                return
+            if cmd == "N":
+                bulk_hdr = 0          # ابدأ حزمة جديدة
+            elif cmd == "E":
+                code_receive_finish()
+            # أي شيء آخر بين الحزم يُتجاهل
+            return
+
+        # وضع الأسطر القديم: K … نص … E
+        if cmd == "E":
+            # نهاية الإرسال دائمًا — حتى لو بقي نص في السطر (فشل حرف سابق)
             code_receive_finish()
-        elif cmd != "\r" and len(code_line) < RUN_MAX_LINE_LEN:
-            code_line += cmd
+        else:
+            code_add_char(cmd)
         return
+
+    # --- نبضة حياة التنفيذ: p تشغيل المراقب، q إيقافه ---
+    if cmd == "p":
+        beat_on = True
+        beat_watch.reset()
+        return
+    if cmd == "q":
+        beat_on = False
+        return
+
     if cmd == "K":
-        code_receive_start()
+        code_receive_start(False)
+        return
+    if cmd == "B":
+        code_receive_start(True)
         return
     if cmd == "E":
         code_receive_finish()
         return
     if cmd == "G":
         run_start()
+        return
+    if cmd == "?":
+        # نبضة تشخيص: تُخبر التطبيق أن برنامج التدريب يعمل ويقرأ الأوامر.
+        # بدونها لا يستطيع التطبيق التمييز بين «أمر لم يُنفَّذ» و«لا أحد يسمع».
+        print("# ✓ HUB_ALIVE v" + HUB_VERSION + " " + str(len(run_queue)) + " " + str(gc.mem_free()))
+        hub.speaker.beep(1200, 40)
+        return
+    if cmd == "V":
+        # قائمة البرامج المحفوظة على الـ Hub بلا وسيط
+        store_list()
+        return
+    if cmd in ("H", "W", "J", "D"):
+        # أمر بسطر واحد: الحرف ثم الوسيط ثم سطر جديد — يعود الـ Hub جاهزًا بعده
+        global single_cmd
+        code_receive_start(False, True)
+        code_line = cmd + " "
+        single_cmd = cmd
         return
 
     # --- إيقاف: تنفيذ كود جارٍ أو تحرير المحركات ---
@@ -905,16 +1236,14 @@ def handle_app_command(cmd):
         hub.speaker.beep(500, 60)
         return
 
-    # --- أوامر التحكم عن بعد (لا تسجيل، لا طباعة) ---
-    if cmd == "w":
+    # --- التحكم عن بعد بالمحركات (الأسهم في التطبيق) ---
+    #   ملاحظة: القيمة الموجبة لمعدّل الدوران تعني يمينًا (مع عقارب الساعة).
+    if cmd == "w":                       # للأمام
         rc_drive(RC_SPEED, 0)
         return
-    if cmd == "s":
+    if cmd == "s":                       # للخلف
         rc_drive(-RC_SPEED, 0)
         return
-    # ملاحظة اتجاه الدوران: في Pybricks القيمة الموجبة لمعدّل الدوران
-    # تعني الدوران يمينًا (مع عقارب الساعة)، والسلبية يسارًا (عكسها).
-    # إذا انعكس الاتجاه على روبوتك (تركيب محرك معكوس) اقلب الإشارتين هنا.
     if cmd == "a":                       # لف يسارًا  (عكس عقارب الساعة)
         rc_drive(0, -RC_TURN)
         return
@@ -922,7 +1251,7 @@ def handle_app_command(cmd):
         rc_drive(0, RC_TURN)
         return
 
-    # أي أمر تدريب: أوقف الدفع عن بعد بنعومة حتى لا تتداخل الحركتان
+    # --- أي أمر تدريب: أوقف الدفع عن بعد بنعومة حتى لا تتداخل الحركتان ---
     if rc_driving:
         rc_halt_and_wait()
 
@@ -938,7 +1267,7 @@ def handle_app_command(cmd):
         do_follow_line_seg()
     elif cmd == "U":
         do_undo()
-    # أي حرف آخر (مسافات، أسطر جديدة...) يُتجاهل
+    # أي حرف آخر (مسافات، أسطر جديدة…) يُتجاهل
 
 # =========================================================
 # 6) البرنامج الرئيسي: توليد كود ذكي من التدريب
@@ -956,16 +1285,20 @@ last_heading = hub.imu.heading()
 
 hub.light.on(Color.BLUE)
 print("")
+print("# HUB_VERSION " + HUB_VERSION)
+print("# برامج محفوظة على الهاب: " + str(len(programs)) + "/" + str(MAX_PROGRAMS) + " (RAM)")
+print("# ذاكرة حرة: " + str(gc.mem_free()) + " بايت")
 print("# جاهز: حرّك الروبوت بيدك أو من تطبيق الويب، ثم اضغط للتسجيل")
 print("# التطبيق: R تسجيل حركة | L قراءة حساسات | C طباعة البرنامج")
 print("#          F نقطة خط ذكية | T متابعة خط | U تراجع")
 print("#          أزرار الأسهم: w/s/d/a للتحريك عن بعد (ناعم)، x = إيقاف")
 print("#          القراءة التلقائية: y تشغيل | z إيقاف (سطور # T أثناء الحركة)")
 print("#          إرسال الكود من التطبيق: K استلام ← أسطر ← E انتهى ← G تنفيذ")
+print("#          H ثم الرقم = عتاة الخط للتنفيذ | p/q نبضة الحياة | x إيقاف")
 print("#          و x أثناء التنفيذ = إيقافه فورًا")
 print("# أزرار الروبوت ما زالت تعمل:")
 print("# - RIGHT       : تسجيل حركة (دوران ثم مستقيم)")
-print("# - LEFT        : تسجيل قراءات الحساسين (لحساب عتاة الخط)")
+print("# - LEFT        : تسجيل قراءة الحسّاس (لحساب عتاة الخط)")
 print("# - CENTER+LEFT : نقطة خط ذكية find_line (+ محاذاة) بدل آخر مستقيم")
 print("# - CENTER+RIGHT: مقطع متابعة خط follow_line بآخر مسافة")
 print("# - LEFT+RIGHT  : حذف آخر تسجيل (مع إرجاع نقطة القياس)")
@@ -974,6 +1307,11 @@ print("# APP_READY")
 
 try:
     while True:
+        # 0) مهل الاستلام الآمنة: إن انقطع الإرسال بعد K (أو تعطّل حرف)
+        #    نخرج من وضع الاستلام تلقائيًا بدل ابتلاع كل الأوامر بلا نهاية
+        if code_mode and code_watch.time() > CODE_TIMEOUT_MS:
+            code_receive_abort("مهلة الاستلام انتهت (5 ثوانٍ بلا بيانات)")
+
         # 1) أوامر التطبيق الواصلة عبر البلوتوث (stdin) - دون حظر الحلقة
         while app_input.poll(0):
             ch = stdin.read(1)
