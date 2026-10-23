@@ -78,7 +78,8 @@ class SingleSensorTests(unittest.TestCase):
         text = text.split("#@@PROGRAM_BEGIN@@")[1].split("#@@PROGRAM_END@@")[0]
         compile(text, "<generated>", "exec")
         self.assertIn("line_sensor = ColorSensor(Port.C)", text)
-        self.assertNotIn("Port.D", text)                 # لا حسّاس ثانٍ
+        self.assertNotIn("ColorSensor(Port.D)", text)    # لا حسّاس ثانٍ على D
+        self.assertIn("arm_motor   = Motor(Port.D)", text)
         self.assertNotIn("right_sensor", text)
         self.assertEqual(text.count("ColorSensor("), 1)  # تهيئة واحدة فقط
         # كل الدوال المساعدة تقرأ من الحسّاس الوحيد
@@ -90,7 +91,8 @@ class SingleSensorTests(unittest.TestCase):
         m.refl.clear()
         m.actions.append(("move", [("find_line", (1, 250)), ("align_line", 25)], 0, 0))
         text = capture(m.print_full_program)[1]
-        self.assertNotIn("Port.D", text)
+        self.assertNotIn("ColorSensor(Port.D)", text)
+        self.assertIn("arm_motor   = Motor(Port.D)", text)
         self.assertEqual(text.count("ColorSensor("), 1)
 
     def test_hub_reads_the_line_sensor(self):
@@ -565,6 +567,42 @@ class ExecutionTests(unittest.TestCase):
         hubclock.advance(m.HEARTBEAT_MS * 5)
         m.run_tick()
         self.assertTrue(m.run_active)
+
+    def test_wheel_diameter_and_arm_motor_on_port_d(self):
+        for m in (hub_loader.load_original(), hub_loader.load_app()):
+            self.assertEqual(m.WHEEL_DIAMETER, 56)
+            self.assertEqual(m.ARM_PORT_LETTER, "D")
+
+        m = hub_loader.load_app()
+        m.actions.clear()
+        m.last_distance = 0
+        m.last_heading = 0
+        m.last_arm_angle = 0
+        m.arm_motor.angle_value = 95
+        m.do_record_move()
+        self.assertEqual(m.actions[-1][1], [("arm", 95)])
+        self.assertEqual(m.last_arm_angle, 95)
+
+        # التراجع يعيد زاوية الذراع المرجعية
+        m.do_undo()
+        self.assertEqual(m.last_arm_angle, 0)
+
+        # التحكم عن بعد بمحرك المنفذ D (u / j)
+        hub_loader.feed(m, "u")
+        self.assertTrue(m.rc_arm_driving)
+        self.assertEqual(m.arm_motor.calls[-1], ("run", m.RC_ARM_SPEED))
+        hub_loader.feed(m, "x")
+        self.assertFalse(m.rc_arm_driving)
+
+        # استلام وتنفيذ أمر محرك المنفذ D (M <angle>)
+        hub_loader.feed(m, "KM -120\nE")
+        self.assertEqual(m.run_queue, [("arm", -120)])
+        m.arm_motor.angle_value = 0
+        m.run_phase = "start"
+        self.assertFalse(m._run_step_arm(-120))
+        m.arm_motor.angle_value = -119
+        self.assertTrue(m._run_step_arm(-120))
+        self.assertGreaterEqual(m.arm_motor.braked, 1)
 
 
 if __name__ == "__main__":

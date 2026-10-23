@@ -213,7 +213,13 @@
         <button class="rc" id="rcBack" style="grid-column:2;grid-row:3" title="اضغط مع الاستمرار">
           <span class="icon">⬇️</span><span class="name">للخلف</span><span class="key">ArrowDown / S</span>
         </button>
-        <button class="rc rc-stop" id="rcStop" style="grid-row:4">
+        <button class="rc" id="rcArmDown" style="grid-column:1;grid-row:4" title="تحريك محرك المنفذ D بالاتجاه السالب (اضغط مع الاستمرار)">
+          <span class="icon">🔽</span><span class="name">محرك D −</span><span class="key">KeyE / E</span>
+        </button>
+        <button class="rc" id="rcArmUp" style="grid-column:3;grid-row:4" title="تحريك محرك المنفذ D بالاتجاه الموجب (اضغط مع الاستمرار)">
+          <span class="icon">🔼</span><span class="name">محرك D +</span><span class="key">KeyQ / Q</span>
+        </button>
+        <button class="rc rc-stop" id="rcStop" style="grid-row:5">
           <span class="icon">⏹</span><span class="name">إيقاف فوري + حرر المحركات</span><span class="key">Space</span>
         </button>
       </div>
@@ -229,7 +235,7 @@
       <div class="grid" id="trainGrid">
         <button class="train" data-cmd="R">
           <span class="icon">➡️</span><span class="name">تسجيل حركة</span>
-          <span class="hint">بديل زر RIGHT — دوران ثم مستقيم (مفتاح R)</span>
+          <span class="hint">بديل زر RIGHT — دوران + مستقيم + محرك D (مفتاح R)</span>
         </button>
         <button class="train" data-cmd="L">
           <span class="icon">🎨</span><span class="name">قراءة الحسّاس</span>
@@ -301,7 +307,7 @@
       <div class="pane-title">📝 المحرّر <small>— Python</small></div>
       <div class="editor-wrap">
         <div class="gutter" id="edGutter">1</div>
-        <textarea id="codeEditor" dir="ltr" spellcheck="false" placeholder="# مثال:&#10;robot.turn(90)&#10;robot.straight(300)&#10;find_line(1, 250)&#10;follow_line(400, &quot;L&quot;)"></textarea>
+        <textarea id="codeEditor" dir="ltr" spellcheck="false" placeholder="# مثال:&#10;robot.turn(90)&#10;robot.straight(300)&#10;arm_motor.run_angle(300, 90)&#10;find_line(1, 250)&#10;follow_line(400, &quot;L&quot;)"></textarea>
       </div>
       <div class="row">
         <button class="grow" id="btnCheckCode">🔍 فحص الكود</button>
@@ -317,8 +323,8 @@
       <div class="warn" id="codeReport" hidden></div>
       <p class="rc-note" style="text-align:start;margin-top:10px">
         ⚠️ <b>ما يُنفَّذ على الـ Hub فعلًا</b>: أوامر الحركة فقط — <code>robot.turn</code> ·
-        <code>robot.straight</code> · <code>find_line</code> · <code>align_on_line</code> ·
-        <code>follow_line</code>. الحلقات والشروط والمتغيّرات تبقى في الملف لـ Pybricks Code ولا تُرسَل،
+        <code>robot.straight</code> · <code>arm_motor.run_angle</code> · <code>find_line</code> ·
+        <code>align_on_line</code> · <code>follow_line</code>. الحلقات والشروط والمتغيّرات تبقى في الملف لـ Pybricks Code ولا تُرسَل،
         والفحص يعرض العدد بالضبط قبل الإرسال.
       </p>
     </section>
@@ -576,7 +582,7 @@ function appendLog(text) {
     }
 
     // عدّاد الأوامر المسجّلة: أسطر الحركة فقط (لا تُحسب أسطر تهيئة البرنامج المطبوعة)
-    if (/^(robot\.|find_line\(|align_on_line\(|follow_line\()/.test(line)
+    if (/^(robot\.|arm_motor\.|find_line\(|align_on_line\(|follow_line\()/.test(line)
         && !/^robot\.(reset|use_gyro|settings)\(/.test(line)) recorded++;
     // التراجع: الروبوت يطبع سطر "# حذف: …" لكل مقطع حُذف → نقصان واحد لكل سطر
     if (/^#\s*(حذف|delete):/.test(line)) recorded = Math.max(0, recorded - 1);
@@ -755,7 +761,7 @@ const sendHubCommand = code => { // أوامر Pybricks المباشرة (بدو
 
 // ===== تغذية راجعة: تنبيه مؤقّت عند الضغط (السجل يبقى لبيانات الروبوت) =====
 const CMD_LABELS = {
-  R: "تسجيل حركة (دوران ثم مستقيم)",
+  R: "تسجيل حركة (دوران + مستقيم + محرك D)",
   L: "قراءة الحسّاس (لحساب عتبة الخط — حسّاس الألوان على C)",
   F: "نقطة خط ذكية find_line",
   T: "متابعة خط follow_line",
@@ -783,9 +789,12 @@ function sendAndShow(ch) {
 
 // ===== التحكم عن بعد: اضغط مع الاستمرار =====
 const RC = { // أحرف التحكم التي يتوقعها as3_app.py
-  fwd: "w", back: "s", left: "a", right: "d", stop: "x"
+  fwd: "w", back: "s", left: "a", right: "d", armUp: "u", armDown: "j", stop: "x"
 };
-const RC_LABELS = { w: "دفع للأمام", s: "دفع للخلف", a: "لف يسارًا", d: "لف يمينًا", x: "إيقاف + حرر المحركات" };
+const RC_LABELS = {
+  w: "دفع للأمام", s: "دفع للخلف", a: "لف يسارًا", d: "لف يمينًا",
+  u: "تحريك محرك D (+)", j: "تحريك محرك D (−)", x: "إيقاف + حرر المحركات"
+};
 const RC_KEEPALIVE_MS = 250; // نُعيد الأمر أثناء الاستمرار؛ الروبوت يتوقف تلقائيًا إذا انقطع
 let rcActive = null, rcTimer = null;
 
@@ -812,7 +821,8 @@ function rcStop(quiet) {
   if (!quiet) showToast("⏹ توقف الحركة عن بعد");
 }
 const RC_HOLD = [
-  ["rcFwd", RC.fwd], ["rcBack", RC.back], ["rcLeft", RC.left], ["rcRight", RC.right]
+  ["rcFwd", RC.fwd], ["rcBack", RC.back], ["rcLeft", RC.left], ["rcRight", RC.right],
+  ["rcArmUp", RC.armUp], ["rcArmDown", RC.armDown]
 ];
 RC_HOLD.forEach(([id, ch]) => {
   const btn = $(id);
@@ -848,14 +858,19 @@ $("chkAutoRead").addEventListener("change", e => {
   showToast(on ? "📡 القراءة التلقائية للحسّاس: مفعّلة" : "📡 القراءة التلقائية: متوقفة");
 });
 
-const RC_BTN_BY_CH = { [RC.fwd]: "rcFwd", [RC.back]: "rcBack", [RC.left]: "rcLeft", [RC.right]: "rcRight" };
+const RC_BTN_BY_CH = {
+  [RC.fwd]: "rcFwd", [RC.back]: "rcBack", [RC.left]: "rcLeft", [RC.right]: "rcRight",
+  [RC.armUp]: "rcArmUp", [RC.armDown]: "rcArmDown"
+};
 // المفاتيح تُقرأ من e.code (المفتاح الفيزيائي على اللوحة) لا من e.key،
 // حتى تعمل مع أي تخطيط: عربي / إنجليزي / أزرار القلم كلها بمكانها الفيزيائي.
 const RC_CODE = {
   ArrowUp: RC.fwd, KeyW: RC.fwd,
   ArrowDown: RC.back, KeyS: RC.back,
   ArrowLeft: RC.left, KeyA: RC.left,
-  ArrowRight: RC.right, KeyD: RC.right
+  ArrowRight: RC.right, KeyD: RC.right,
+  KeyQ: RC.armUp,
+  KeyE: RC.armDown
 };
 const TRAIN_CODE = { KeyR: "R", KeyL: "L", KeyF: "F", KeyT: "T", KeyU: "U", KeyC: "C" };
 const isTyping = t => t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA");
@@ -997,6 +1012,14 @@ function parseStatement(t, out, skipped) {
     if (Number.isFinite(v)) out.push("S " + Math.round(v)); else skipped.push(t);
     return true;
   }
+  if ((m = t.match(/^arm_motor\.run_angle\(\s*([^)]*)\)$/))) {
+    const a = progArgs(m[1]);
+    const ang = a.length >= 2 ? progNum(a[1]) : (a.length === 1 ? progNum(a[0]) : NaN);
+    const spd = a.length >= 2 ? progNum(a[0]) : 300;
+    if (Number.isFinite(ang) && Number.isFinite(spd)) out.push("M " + Math.round(ang));
+    else skipped.push(t);
+    return true;
+  }
   if ((m = t.match(/^find_line\(\s*([^)]*)\)$/))) {
     const a = progArgs(m[1]);
     const dir = a.length ? (progNum(a[0]) < 0 ? -1 : 1) : 1;
@@ -1023,7 +1046,7 @@ function parseStatement(t, out, skipped) {
     return true;
   }
   // سطر يبدأ كأمر معروف لكنه غير مكتمل (قوس ناقص…) أو أمر غير مدعوم
-  if (/^(robot\.|find_line\s*\(|align_on_line\s*\(|follow_line\s*\()/.test(t)
+  if (/^(robot\.|arm_motor\.|find_line\s*\(|align_on_line\s*\(|follow_line\s*\()/.test(t)
       && !/^robot\.(reset|use_gyro|settings)\(/.test(t)) {
     skipped.push(t);
     return true;
@@ -1064,7 +1087,7 @@ function scanProgram(src, strict) {
       const before = lines.length;
       parseStatement(t, lines, skipped);
       if (strict && lines.length === before
-          && /^(robot|find_line|align_on_line|follow_line)/.test(t)) {
+          && /^(robot|arm_motor|find_line|align_on_line|follow_line)/.test(t)) {
         seen.push(t);
       }
     }
@@ -1332,9 +1355,9 @@ function whyNoCommands(text, parsed) {
   }
   if (!parsed.skipped.length && !(parsed.seen && parsed.seen.length)) {
     const hasRun = /^\s*def\s+run\s*\(/m.test(src);
-    const hasCmd = /(robot\.turn|robot\.straight|find_line|align_on_line|follow_line)\s*\(/.test(src);
+    const hasCmd = /(robot\.turn|robot\.straight|arm_motor\.run_angle|find_line|align_on_line|follow_line)\s*\(/.test(src);
     if (!hasCmd) {
-      bits.push("لا يوجد أي سطر فيه robot.turn / robot.straight / find_line /"
+      bits.push("لا يوجد أي سطر فيه robot.turn / robot.straight / arm_motor.run_angle / find_line /"
         + " align_on_line / follow_line — اكتبها كل واحدة في سطر مستقل");
     } else if (hasRun) {
       bits.push("الأوامر موجودة لكن خارج دالة run() أو في جسم دالة مساعدة — ضعها بمسافة بادئة داخل run()");

@@ -36,9 +36,14 @@ hub = PrimeHub()
 left_motor  = Motor(Port.A, Direction.COUNTERCLOCKWISE)  # عدّل الاتجاه إذا لزم
 right_motor = Motor(Port.B)
 
+# محرك إضافي (ذراع / بوابة / مهام) على المنفذ D
+ARM_PORT        = Port.D
+ARM_PORT_LETTER = "D"          # يُطبع في البرنامج الناتج
+arm_motor = Motor(ARM_PORT)
+
 # حساس ألوان واحد فقط، مركّب على المنفذ C.
 #   كل القراءات (عتبة الخط، البحث عن الخط، المحاذاة، متابعة الحافة) تعتمد
-#   على هذا الحسّاس وحده — لا يوجد حسّاس على D. غيّر LINE_PORT فقط إن كان
+#   على هذا الحسّاس وحده — لا يوجد حسّاس ألوان على D. غيّر LINE_PORT فقط إن كان
 #   الحسّاس في منفذ آخر.
 LINE_PORT        = Port.C
 LINE_PORT_LETTER = "C"          # نفس المنفذ أعلاه — يُطبع في البرنامج الناتج
@@ -47,7 +52,7 @@ line_sensor = ColorSensor(LINE_PORT)
 # =========================================================
 # 2) أبعاد الروبوت (عدّلها لاحقاً للمعايرة الدقيقة)
 # =========================================================
-WHEEL_DIAMETER = 62.4
+WHEEL_DIAMETER = 56
 AXLE_TRACK     = 110
 
 robot = DriveBase(left_motor, right_motor, WHEEL_DIAMETER, AXLE_TRACK)
@@ -57,8 +62,10 @@ robot.use_gyro(True)  # نفس إعداد برنامج السباق (جيرو م
 HUB_VERSION = "6"
 
 # عتبات دنيا تتجاهل اهتزاز اليد
-MIN_DIST = 5  # أقل من 5 مم = ضجيج
-MIN_ANG  = 2  # أقل من درجتين = ضجيج
+MIN_DIST    = 5    # أقل من 5 مم = ضجيج
+MIN_ANG     = 2    # أقل من درجتين = ضجيج
+MIN_ARM_ANG = 5    # أقل من 5 درجات على محرك المنفذ D = ضجيج
+ARM_SPEED   = 300  # سرعة محرك المنفذ D في البرنامج الناتج (deg/s)
 
 # إعدادات التصحيح الذكي
 SEARCH_MARGIN = 50   # هامش بحث إضافي بعد المسافة المجرَّبة (مم)
@@ -136,6 +143,7 @@ def setup_lines(include_sensors):
         "hub = PrimeHub()",
         "left_motor  = Motor(Port.A, Direction.COUNTERCLOCKWISE)",
         "right_motor = Motor(Port.B)",
+        "arm_motor   = Motor(Port." + ARM_PORT_LETTER + ")  # محرك الذراع / المهام على المنفذ D",
     ]
     if include_sensors:
         # حساس واحد فقط (المنفذ C) — نفس إعداد نسخة الـ Hub
@@ -223,6 +231,8 @@ def format_seg(seg):
         return "robot.turn(" + str(val) + ")"
     if kind == "straight":
         return "robot.straight(" + str(val) + ")"
+    if kind == "arm":
+        return "arm_motor.run_angle(" + str(ARM_SPEED) + ", " + str(val) + ")"
     if kind == "find_line":
         direction, max_dist = val
         return "find_line(" + str(direction) + ", " + str(max_dist) + ")"
@@ -238,11 +248,12 @@ def merged_moves():
     # يدمج الحركات المتتالية من نفس النوع فقط (turn + turn مثلاً).
     # القطع الذكية تبقى كما هي لأنها معالم مستقلة على المسار.
     merged = []
-    for kind, content, _, _ in actions:
+    for item in actions:
+        kind, content = item[0], item[1]
         if kind != "move":
             continue
         for seg in content:
-            if seg[0] in ("turn", "straight") and merged and merged[-1][0] == seg[0]:
+            if seg[0] in ("turn", "straight", "arm") and merged and merged[-1][0] == seg[0]:
                 merged[-1] = (seg[0], merged[-1][1] + seg[1])
             else:
                 merged.append((seg[0], seg[1]))
@@ -254,7 +265,8 @@ def print_full_program():
     n_cmds = 0
     include_sensors = False
     include_helpers = False
-    for kind, content, _, _ in actions:
+    for item in actions:
+        kind, content = item[0], item[1]
         if kind == "move":
             n_cmds += len(content)
             for seg in content:
@@ -283,7 +295,7 @@ def print_full_program():
     print("def run():")
     printed = False
     for seg in merged_moves():
-        if seg[0] in ("turn", "straight") and seg[1] == 0:
+        if seg[0] in ("turn", "straight", "arm") and seg[1] == 0:
             continue  # قطعان متعاكسان أُلغيَا
         print("    " + format_seg(seg))
         printed = True
@@ -296,7 +308,8 @@ def print_full_program():
     if include_sensors:
         print("#")
         print("# --- ملاحظات المعايرة: قراءات الحساسات أثناء التدريب ---")
-        for kind, content, _, _ in actions:
+        for item in actions:
+            kind, content = item[0], item[1]
             if kind == "sensor":
                 for line in content:
                     print(line)
@@ -322,8 +335,9 @@ def print_sensor(name, s):
 #   كل فعل كان داخل حلقة الأزرار أصبح دالة مستقلة، حتى يستطيع
 #   زر الروبوت وأمر التطبيق استدعاء نفس الفعل تماماً.
 # =========================================================
-last_distance = 0
-last_heading = 0
+last_distance  = 0
+last_heading   = 0
+last_arm_angle = 0
 
 # تسجيل مدخل stdin للاستطلاع دون حظر (non-blocking)
 app_input = poll()
@@ -331,7 +345,8 @@ app_input.register(stdin)
 
 # ---------------------------------------------------------
 # التحكم عن بعد من تطبيق الويب (أزرار الأسهم في app/index.html)
-#   الأحرف: w=للأمام s=للخلف a=لف يسارًا d=لف يمينًا x=إيقاف
+#   الأحرف: w=للأمام s=للخلف a=لف يسارًا d=لف يمينًا
+#           u=محرك المنفذ D (+)  j=محرك المنفذ D (-)  x=إيقاف
 #   الفكرة: التطبيق يكرر الأمر كل ~250ms ما دام الزر مضغوطًا،
 #   والحلقة هنا تنفّذ خطوة صغيرة في كل دورة. إذا توقفت التكرارات
 #   (قطع اتصال / نسيان إصبع / خروج من الصفحة) يتباطأ الروبوت
@@ -341,9 +356,10 @@ app_input.register(stdin)
 # محدود في كل دورة (تسارع محدود RC_ACCEL) — فلا تنتفض الحركة ولا
 # تتوقف فجأة، ويصبح الإيقاف تباطؤًا قصيرًا (~0.2 ثانية).
 # ---------------------------------------------------------
-RC_SPEED   = 120  # مم/ث للدفع الأمامي/الخلفي — عدّله حسب روبوتك
-RC_TURN    = 90   # درجة/ث للدوران في المكان
-                 # (موجب = يمين/مع عقارب الساعة، سالب = يسار — انظر handle_app_command)
+RC_SPEED     = 120  # مم/ث للدفع الأمامي/الخلفي — عدّله حسب روبوتك
+RC_TURN      = 90   # درجة/ث للدوران في المكان
+                   # (موجب = يمين/مع عقارب الساعة، سالب = يسار — انظر handle_app_command)
+RC_ARM_SPEED = 200  # درجة/ث لتحريك محرك المنفذ D عن بعد (ذراع / بوابة)
 RC_ACCEL      = 900   # مم/ث²     — تسارع/تباطؤ القيادة (أعلى = أسرع استجابة)
 RC_TURN_ACCEL = 1200  # درجة/ث²   — تسارع/تباطؤ الدوران
 RC_FRAMES  = 20   # دورات الحلقة (~30-40ms للدورة) قبل الإيقاف التلقائي
@@ -361,6 +377,10 @@ rc_target_turn  = 0
 rc_speed   = 0.0  # السرعة الحالية (تتحرك تدريجيًا نحو الهدف)
 rc_turn    = 0.0
 rc_driving = False
+
+rc_arm_frames  = 0      # عدّاد أمان محرك المنفذ D
+rc_arm_target  = 0      # سرعة محرك المنفذ D المطلوبة
+rc_arm_driving = False
 
 def _approach(cur, target, step):
     # خطوة واحدة نحو الهدف بمقدار أقصاه step
@@ -380,12 +400,32 @@ def rc_drive(speed, turn):
         hub.speaker.beep(300, 40)
         rc_driving = True
 
+def rc_arm(speed):
+    # يبدأ/يجدّد تحريك محرك المنفذ D عن بعد بينما الزر مضغوط
+    global rc_arm_frames, rc_arm_target, rc_arm_driving
+    rc_arm_frames = RC_FRAMES
+    rc_arm_target = speed
+    if not rc_arm_driving:
+        hub.speaker.beep(350, 40)
+        rc_arm_driving = True
+    arm_motor.run(int(speed))
+
+def rc_arm_stop():
+    # إيقاف وتحرير محرك المنفذ D (coast) ليُحرَّك باليد بحرية
+    global rc_arm_frames, rc_arm_target, rc_arm_driving
+    rc_arm_frames = 0
+    rc_arm_target = 0
+    if rc_arm_driving:
+        rc_arm_driving = False
+        arm_motor.stop()
+
 def rc_halt():
     # طلب إيقاف ناعم: يُصفّر الهدف ويكمل rc_tick التباطؤ ثم يحرّر المحركات
     global rc_frames, rc_target_speed, rc_target_turn
     rc_frames = 0
     rc_target_speed = 0
     rc_target_turn = 0
+    rc_arm_stop()
 
 def rc_release():
     # تحرير المحركات (coast) ليُدفع الروبوت باليد بعده مباشرة
@@ -395,11 +435,12 @@ def rc_release():
     rc_turn = 0
     left_motor.stop()
     right_motor.stop()
+    rc_arm_stop()
 
 def rc_stop():
     # إيقاف فوري بلا تباطؤ — للطوارئ وعند إغلاق البرنامج فقط
     global rc_frames, rc_target_speed, rc_target_turn
-    if rc_driving:
+    if rc_driving or rc_arm_driving:
         hub.speaker.beep(250, 40)
     rc_frames = 0
     rc_target_speed = 0
@@ -408,7 +449,12 @@ def rc_stop():
 
 def rc_tick():
     # خطوة واحدة: نقترب من الهدف بتسارع محدود، ثم تباطؤ تلقائي عند انتهاء المهلة
-    global rc_frames, rc_speed, rc_turn, rc_target_speed, rc_target_turn
+    global rc_frames, rc_speed, rc_turn, rc_target_speed, rc_target_turn, rc_arm_frames
+    if rc_arm_frames > 0:
+        rc_arm_frames -= 1
+        if rc_arm_frames == 0:
+            rc_arm_stop()
+
     if rc_frames > 0:
         rc_frames -= 1
     elif rc_target_speed or rc_target_turn:
@@ -436,7 +482,7 @@ def rc_halt_and_wait():
         rc_tick()
         wait(20)
         n += 1
-    if rc_driving:
+    if rc_driving or rc_arm_driving:
         rc_stop()
 
 # ---------------------------------------------------------
@@ -460,10 +506,13 @@ def rc_halt_and_wait():
 # ---------------------------------------------------------
 RUN_SPEED        = 220    # مم/ث   — سرعة القطع المستقيم
 RUN_TURN_RATE    = 130    # درجة/ث — سرعة الدوران
+RUN_ARM_SPEED    = 300    # درجة/ث — سرعة محرك المنفذ D أثناء التنفيذ
 RUN_SEARCH_SPEED = 80     # مم/ث   — سرعة البحث عن الخط
 RUN_FOLLOW_SPEED = 90     # مم/ث   — سرعة متابعة الخط
 RUN_TOL_DIST     = 4      # مم     — سماحية الوصول للمسافة
 RUN_TOL_ANG      = 2      # درجة   — سماحية الوصول للزاوية
+RUN_TOL_ARM      = 3      # درجة   — سماحية الوصول لزاوية محرك المنفذ D
+RUN_ARM_STALL_N  = 15     # دورات ثبات الزاوية قبل اعتبار الذراع وصلت لنهايتها الميكانيكية
 RUN_ALIGN_MAX    = 45     # درجة   — أقصى دوران لمحاذاة الخط
 RUN_MAX_MS       = 120000 # أمان: أقصى مدة تنفيذ، يُلغى بعدها تلقائيًا
 RUN_MAX_LINES    = 90     # أقصى عدد أوامر يُستلم من التطبيق (ذاكرة الـ Hub)
@@ -501,6 +550,9 @@ run_index  = 0       # رقم المقطع الجاري
 run_phase  = "start" # "start" = تهيئة المقطع، "go" = تنفيذه
 run_goal_d = 0       # هدف المسافة للمقطع الحالي
 run_goal_h = 0       # هدف الزاوية للمقطع الحالي
+run_goal_a = 0       # هدف زاوية محرك المنفذ D للمقطع الحالي
+run_arm_last = 0     # آخر زاوية لمحرك D أثناء التنفيذ (لكشف التوقف الميكانيكي)
+run_arm_stall = 0    # عدّاد دورات ثبات محرك D
 run_base_d = 0       # مسافة البداية للمقطع الحالي
 run_base_h = 0       # زاوية البداية للمقطع الحالي
 run_th     = 30      # عتاة الخط المستخدمة أثناء التنفيذ
@@ -521,6 +573,8 @@ def seg_label(seg):
         return "robot.turn(" + str(seg[1]) + ")"
     if kind == "straight":
         return "robot.straight(" + str(seg[1]) + ")"
+    if kind == "arm":
+        return "arm_motor.run_angle(" + str(ARM_SPEED) + ", " + str(seg[1]) + ")"
     if kind == "find_line":
         return "find_line(" + str(seg[1]) + ", " + str(seg[2]) + ")"
     if kind == "align_line":
@@ -540,6 +594,8 @@ def parse_code_line(line):
             return ("turn", int(float(parts[1])))
         if k == "S":
             return ("straight", int(float(parts[1])))
+        if k == "M":
+            return ("arm", int(float(parts[1])))
         if k == "F" and len(parts) >= 3:
             return ("find_line", int(float(parts[1])), int(float(parts[2])))
         if k == "A":
@@ -780,15 +836,17 @@ def code_receive_finish():
 def resync_tracking():
     # بعد التشغيل: نُعيد نقطة القياس إلى موضع الروبوت الحالي
     # حتى لا يُسجَّل مسار التنفيذ كأنه حركة يدوية في التسجيل التالي
-    global last_distance, last_heading
-    last_distance = robot.distance()
-    last_heading = hub.imu.heading()
+    global last_distance, last_heading, last_arm_angle
+    last_distance  = robot.distance()
+    last_heading   = hub.imu.heading()
+    last_arm_angle = arm_motor.angle()
 
 def _run_end(msg, freq):
     # brake وليس stop: التوقف الآمن يجب أن يكبح المحركات فورًا
     # (stop = coast، أي أن الروبوت قد يتابع مسافة محسوسة بعد الإلغاء).
     global run_active, beat_on
     robot.brake()
+    arm_motor.stop()
     run_active = False
     beat_on = False
     resync_tracking()
@@ -863,6 +921,32 @@ def _run_step_turn(angle):
     robot.drive(0, rate if err > 0 else -rate)
     return False
 
+def _run_step_arm(angle):
+    global run_phase, run_goal_a, run_arm_last, run_arm_stall
+    if run_phase == "start":
+        run_goal_a = arm_motor.angle() + angle
+        run_arm_last = arm_motor.angle()
+        run_arm_stall = 0
+        run_phase = "go"
+        return False
+    cur = arm_motor.angle()
+    err = run_goal_a - cur
+    if abs(err) <= RUN_TOL_ARM:
+        arm_motor.brake()
+        return True
+    if abs(cur - run_arm_last) < 1:
+        run_arm_stall += 1
+        if run_arm_stall >= RUN_ARM_STALL_N:
+            # وصلت الذراع لنهايتها الميكانيكية أو أمسكت المكعب: نتوقف بأمان
+            arm_motor.brake()
+            return True
+    else:
+        run_arm_last = cur
+        run_arm_stall = 0
+    spd = int(_clamp(abs(err) * 5, 45, RUN_ARM_SPEED))
+    arm_motor.run(spd if err > 0 else -spd)
+    return False
+
 def _run_step_find(direction, max_dist):
     global run_phase, run_base_d
     if run_phase == "start":
@@ -934,6 +1018,8 @@ def run_tick():
         done = _run_step_straight(seg[1])
     elif kind == "turn":
         done = _run_step_turn(seg[1])
+    elif kind == "arm":
+        done = _run_step_arm(seg[1])
     elif kind == "find_line":
         done = _run_step_find(seg[1], seg[2])
     elif kind == "align_line":
@@ -994,7 +1080,7 @@ def auto_read_tick():
 
 MAX_ACTIONS = 60   # أقصى عدد تسجيلات (ذاكرة الـ Hub محدودة)
 
-def push_action(kind, content, prev_dist=None, prev_head=None):
+def push_action(kind, content, prev_dist=None, prev_head=None, prev_arm=None):
     # يضيف تسجيلًا مع احترام الحد الأقصى؛ يعيد False إن رُفض.
     # عند الرفض لا نحرّك نقطة القياس: الحركة تبقى «غير مسجَّلة» فيلتقطها
     # التسجيل التالي بدل أن تُفقد بصمت.
@@ -1003,20 +1089,23 @@ def push_action(kind, content, prev_dist=None, prev_head=None):
               + ") — احذف بعضها بـ U ثم أعد المحاولة")
         hub.speaker.beep(250, 250)
         return False
-    actions.append((kind, content, prev_dist, prev_head))
+    actions.append((kind, content, prev_dist, prev_head, prev_arm))
     return True
 
 def do_undo():
-    global last_distance, last_heading
+    global last_distance, last_heading, last_arm_angle
     # تراجع: يحذف كل ما أضافته آخر ضغطة دفعة واحدة ويعيد المرجع السابق
     if actions:
-        kind, content, prev_dist, prev_head = actions.pop()
+        item = actions.pop()
+        kind, content, prev_dist, prev_head = item[0], item[1], item[2], item[3]
+        prev_arm = item[4] if len(item) > 4 and item[4] is not None else last_arm_angle
         if kind == "move":
             for seg in content:
                 print("# حذف: " + format_seg(seg))
             # إرجاع نقطة القياس حتى يمكن إعادة تسجيل نفس الحركة
-            last_distance = prev_dist
-            last_heading = prev_head
+            last_distance  = prev_dist
+            last_heading   = prev_head
+            last_arm_angle = prev_arm
         else:
             print("# حذف قراءات الحساسات الأخيرة")
     else:
@@ -1043,7 +1132,7 @@ def do_find_line_point():
     max_dist = max(int(round(abs(diff_dist))) + SEARCH_MARGIN, MIN_SEARCH)
     segs.append(("find_line", (direction, max_dist)))
 
-    if push_action("move", segs, last_distance, last_heading):
+    if push_action("move", segs, last_distance, last_heading, last_arm_angle):
         for seg in segs:
             print(format_seg(seg))
         last_distance = curr_distance
@@ -1070,7 +1159,7 @@ def do_follow_line_seg():
         segs.append(("follow_line", (int(round(diff_dist)), FOLLOW_SIDE)))
 
     if segs:
-        if push_action("move", segs, last_distance, last_heading):
+        if push_action("move", segs, last_distance, last_heading, last_arm_angle):
             for seg in segs:
                 print(format_seg(seg))
             last_distance = curr_distance
@@ -1080,36 +1169,45 @@ def do_follow_line_seg():
         print("# حركة أصغر من العتبة - تم تجاهلها")
 
 def do_record_move():
-    global last_distance, last_heading
+    global last_distance, last_heading, last_arm_angle
     curr_distance = robot.distance()
-    curr_heading = hub.imu.heading()
+    curr_heading  = hub.imu.heading()
+    curr_arm      = arm_motor.angle()
 
     diff_dist = curr_distance - last_distance
     diff_head = curr_heading - last_heading  # درجات (موجب = مع عقارب الساعة)
+    diff_arm  = curr_arm - last_arm_angle    # درجات محرك المنفذ D
 
     did_straight = False
     did_turn = False
+    did_arm = False
     segs = []
 
-    # الدوران أولاً ثم المستقيم (ترتيب "نقطة الطريق": وجّه ثم سِر)
+    # الدوران أولاً ثم المستقيم ثم محرك الذراع D
     if abs(diff_head) >= MIN_ANG:
         segs.append(("turn", int(round(diff_head))))
         did_turn = True
     if abs(diff_dist) >= MIN_DIST:
         segs.append(("straight", int(round(diff_dist))))
         did_straight = True
+    if abs(diff_arm) >= MIN_ARM_ANG:
+        segs.append(("arm", int(round(diff_arm))))
+        did_arm = True
 
     if segs:
         # نحفظ المرجع السابق داخل العنصر حتى يستعيده التراجع
-        if push_action("move", segs, last_distance, last_heading):
+        if push_action("move", segs, last_distance, last_heading, last_arm_angle):
             for seg in segs:
                 print(format_seg(seg))
-            last_distance = curr_distance
-            last_heading = curr_heading
+            last_distance  = curr_distance
+            last_heading   = curr_heading
+            last_arm_angle = curr_arm
             if did_turn:
                 hub.speaker.beep(800, 80)
             if did_straight:
                 hub.speaker.beep(600, 80)
+            if did_arm:
+                hub.speaker.beep(700, 80)
     else:
         print("# حركة أصغر من العتبة - تم تجاهلها")
 
@@ -1236,7 +1334,7 @@ def handle_app_command(cmd):
         hub.speaker.beep(500, 60)
         return
 
-    # --- التحكم عن بعد بالمحركات (الأسهم في التطبيق) ---
+    # --- التحكم عن بعد بالمحركات (الأسهم في التطبيق + محرك D) ---
     #   ملاحظة: القيمة الموجبة لمعدّل الدوران تعني يمينًا (مع عقارب الساعة).
     if cmd == "w":                       # للأمام
         rc_drive(RC_SPEED, 0)
@@ -1250,9 +1348,15 @@ def handle_app_command(cmd):
     if cmd == "d":                       # لف يمينًا  (مع عقارب الساعة)
         rc_drive(0, RC_TURN)
         return
+    if cmd == "u":                       # محرك المنفذ D (+) رفع / فتح
+        rc_arm(RC_ARM_SPEED)
+        return
+    if cmd == "j":                       # محرك المنفذ D (-) خفض / إغلاق
+        rc_arm(-RC_ARM_SPEED)
+        return
 
     # --- أي أمر تدريب: أوقف الدفع عن بعد بنعومة حتى لا تتداخل الحركتان ---
-    if rc_driving:
+    if rc_driving or rc_arm_driving:
         rc_halt_and_wait()
 
     if cmd == "R":
@@ -1277,11 +1381,14 @@ for line in setup_lines(False):
 
 left_motor.stop()   # coast: تُترك المحركات حرة ليُدفع الروبوت باليد
 right_motor.stop()
+arm_motor.stop()    # coast: يُترك محرك المنفذ D حراً لتحريك الذراع باليد
+arm_motor.reset_angle(0)
 
 robot.reset()  # تصفير عدادات المسافة والزاوية (والجيرو)
 
-last_distance = robot.distance()
-last_heading = hub.imu.heading()
+last_distance  = robot.distance()
+last_heading   = hub.imu.heading()
+last_arm_angle = arm_motor.angle()
 
 hub.light.on(Color.BLUE)
 print("")
@@ -1291,13 +1398,13 @@ print("# ذاكرة حرة: " + str(gc.mem_free()) + " بايت")
 print("# جاهز: حرّك الروبوت بيدك أو من تطبيق الويب، ثم اضغط للتسجيل")
 print("# التطبيق: R تسجيل حركة | L قراءة حساسات | C طباعة البرنامج")
 print("#          F نقطة خط ذكية | T متابعة خط | U تراجع")
-print("#          أزرار الأسهم: w/s/d/a للتحريك عن بعد (ناعم)، x = إيقاف")
+print("#          أزرار الأسهم: w/s/d/a للتحريك + u/j لمحرك D، x = إيقاف")
 print("#          القراءة التلقائية: y تشغيل | z إيقاف (سطور # T أثناء الحركة)")
 print("#          إرسال الكود من التطبيق: K استلام ← أسطر ← E انتهى ← G تنفيذ")
 print("#          H ثم الرقم = عتاة الخط للتنفيذ | p/q نبضة الحياة | x إيقاف")
 print("#          و x أثناء التنفيذ = إيقافه فورًا")
 print("# أزرار الروبوت ما زالت تعمل:")
-print("# - RIGHT       : تسجيل حركة (دوران ثم مستقيم)")
+print("# - RIGHT       : تسجيل حركة (دوران ثم مستقيم + محرك D)")
 print("# - LEFT        : تسجيل قراءة الحسّاس (لحساب عتاة الخط)")
 print("# - CENTER+LEFT : نقطة خط ذكية find_line (+ محاذاة) بدل آخر مستقيم")
 print("# - CENTER+RIGHT: مقطع متابعة خط follow_line بآخر مسافة")
@@ -1327,7 +1434,7 @@ try:
         # 2) أزرار الروبوت الفعلية (نفس أولوية الفحص السابقة)
         #    أي زر يوقف الدفع عن بعد أو تنفيذ الكود أولًا حتى لا يتداخلا
         pressed = hub.buttons.pressed()
-        if pressed and rc_driving:
+        if pressed and (rc_driving or rc_arm_driving):
             rc_halt_and_wait()
         if pressed and run_active:
             run_cancel("زر من الهاب")
@@ -1376,3 +1483,4 @@ finally:
     rc_stop()
     left_motor.stop()
     right_motor.stop()
+    arm_motor.stop()
