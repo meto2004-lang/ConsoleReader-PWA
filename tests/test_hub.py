@@ -708,6 +708,34 @@ class AutoRecordWroTests(unittest.TestCase):
         hub_loader.feed(m, "0")
         self.assertEqual(m.actions, [])
 
+    def test_slow_hand_push_and_turn_pivot_roll_ignored(self):
+        m = hub_loader.load_app()
+        m.actions.clear()
+        m.AUTO_PRINT_PROG = False
+        m.resync_tracking()
+        m.line_sensor.reflection_value = 85
+
+        # 1) تحريك يدوي بطيء جدًا (4 مم كل 100ms، أقل من MOVE_EPS_DIST=8) لمسافة 100 مم
+        for step in range(1, 26):
+            m.robot.distance_value = step * 4
+            self._sample(m, 1)
+        # لم يُسجّل أثناء الحركة المستمرة
+        self.assertEqual(len(m.actions), 0)
+        # يتوقف لـ AUTO_SETTLE_TICKS دورات ← يُسجّل 100 مم كاملة
+        self._sample(m, m.AUTO_SETTLE_TICKS)
+        self.assertEqual(len(m.actions), 1)
+        self.assertEqual(m.actions[-1][1], [("straight", 100)])
+
+        # 2) لفّ الروبوت باليد 88 درجة مع دحرجة عجلات عرضية (22 مم) بسبب محور الدوران
+        m.hub.imu.heading_value = 88
+        m.robot.distance_value = 122
+        self._sample(m, 1)
+        self._sample(m, m.AUTO_SETTLE_TICKS)
+        self.assertEqual(len(m.actions), 2)
+        # يُسجّل الدوران فقط (90°) ويتجاهل دحرجة الـ 22 مم العرضية
+        self.assertEqual(m.actions[-1][1], [("turn", 90)])
+        self.assertEqual(m.last_distance, 122)
+
 
 if __name__ == "__main__":
     unittest.main()

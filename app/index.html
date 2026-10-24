@@ -190,37 +190,38 @@
     <button class="btn-stop" id="btnStop" disabled>⏹ إيقاف البرنامج</button>
   </div>
   <div class="row">
-    <button id="btnCopyHubScript" class="grow" title="انسخ كود as3_app.py المحدّث (v8) والصقه في code.pybricks.com لتفعيل التسجيل التلقائي ومحرك المنفذ D">📋 نسخ كود الروبوت المحدّث (as3_app.py v8)</button>
+    <button id="btnCopyHubScript" class="grow" title="انسخ كود as3_app.py المحدّث (v9) والصقه في code.pybricks.com لتفعيل التسجيل التلقائي الدقيق ومحرك المنفذ D">📋 نسخ كود الروبوت المحدّث (as3_app.py v9)</button>
     <button id="btnDownloadHubScript" title="تنزيل ملف as3_app.py المحدّث لرفعه إلى الـ Hub عبر Pybricks Code">⬇️ تنزيل as3_app.py</button>
   </div>
 
-  <div class="warn" id="needHubUpdate" hidden>⚠️ <b>كود التدريب داخل الـ Hub قديم (<span id="oldHubVer">v6</span>) ولا يدعم تحريك محرك الذراع على المنفذ D!</b><br>اضغط زر <b>«📋 نسخ كود الروبوت المحدّث (as3_app.py v8)»</b> أعلاه، والصقه في <code>code.pybricks.com</code> وشغّله على الـ Hub مرة واحدة ليحفظ النسخة الجديدة.</div>
+  <div class="warn" id="needHubUpdate" hidden>⚠️ <b>كود التدريب داخل الـ Hub أقدم من النسخة الحالية (<span id="oldHubVer">v6</span>)!</b><br>لضمان عمل التسجيل التلقائي الدقيق ومحرك المنفذ D بشكل سليم، اضغط زر <b>«📋 نسخ كود الروبوت المحدّث (as3_app.py v9)»</b> أعلاه، والصقه في <code>code.pybricks.com</code> وشغّله على الـ Hub مرة واحدة فقط.</div>
   <div class="warn" id="needConn">🔒 <b>غير متصل بالروبوت بعد</b> — أي ضغطة الآن لن تصل إلى الـ Hub. اضغط «🔵 اتصال بالبلوتوث» واختر الـ Hub، ثم «▶ تشغيل برنامج التدريب».</div>
   <div class="warn" id="needHttps" hidden></div>
 
   <h2>🎮 التدريب والتحكم عن بعد (مع التسجيل التلقائي الذكي WRO 2026)</h2>
-  <p class="rc-note">طريقة العمل التلقائية: <b>فقط حرّك الروبوت بيدك أو بالأسهم ثم توقف نصف ثانية</b> — سيحفظ الروبوت الخطوة ويثبّت الزوايا القائمة 90° ويكتشف الخط الأسود ويحدّث برنامج السباق في الأسفل تلقائيًا دون لمس أي زر!</p>
+  <p class="rc-note">طريقة العمل التلقائية: 1) ضع الروبوت في مربع <b>START</b> واضغط <b>«🟢 بدء مسار تلقائي جديد من START»</b> ← 2) حرّك الروبوت بيدك أو بالأسهم وتوقف <b>0.6 ثانية</b> عند كل محطة (ستسمع نغمة قصيرة ويتحدث الكود بالأسفل فورًا) ← 3) عند نهاية المسار اضغط <b>«⏹ إنهاء التسجيل وتثبيت الكود»</b> قبل حمل الروبوت وإرجاعه لبداية البساط.</p>
 
   <div class="pane" style="margin-bottom:14px">
     <div class="pane-title">🤖 إعدادات التسجيل التلقائي الذكي بدون أزرار <small id="autoRecBadge" style="color:#86efac">— نشط وجاهز</small></div>
+    <div class="row" style="margin-top:6px;margin-bottom:10px">
+      <button id="btnClearPath" class="grow" style="background:#065f46;border-color:#10b981;color:#ecfdf5;font-weight:700" title="يمسح المسار القديم ويصفّر نقطة القياس في مربع START ويبدأ التسجيل التلقائي (تضيء لمبة الـ Hub بالأخضر)">🟢 بدء مسار تلقائي جديد من START</button>
+      <button id="btnFinishAutoPath" class="grow" style="background:#7c2d12;border-color:#f59e0b;color:#fef3c7;font-weight:700" title="يوقف التسجيل التلقائي ويطبع الكود النهائي حتى تتمكن من حمل الروبوت وإرجاعه إلى START دون تسجيل حركة يدك">⏹ إنهاء التسجيل وتثبيت الكود</button>
+    </div>
     <label class="switch" for="chkAutoRecord">
       <input type="checkbox" id="chkAutoRecord" checked>
       <span>🤖 <b>التسجيل التلقائي للمسار والذراع بدون ضغط أزرار (Auto-Record)</b><br>
-        <small>يسجّل كل حركة (مستقيم / دوران / ذراع D) تلقائيًا بمجرد توقفك لنصف ثانية أو عند تغيّر نوع الحركة، ويحدّث الكود الجاهز بالأسفل فورًا.</small></span>
+        <small>يسجّل كل حركة (مستقيم / دوران / ذراع D) تلقائيًا بمجرد توقفك لـ 0.6 ثانية (حتى لو كنت تدفعه ببطء)، ويحدّث الكود الجاهز بالأسفل فورًا دون إبطاء البلوتوث.</small></span>
     </label>
     <label class="switch" for="chkSnap90" style="margin-top:8px">
       <input type="checkbox" id="chkSnap90" checked>
-      <span>📐 <b>تثبيت الزوايا القائمة 90° وتجاهل اهتزاز اليد (مخصص لبساط WRO 2026)</b><br>
-        <small>يقرب أي دوران قريب من 90° أو 180° (بهامش ±10°) إلى زاوية قائمة دقيقة، ويتجاهل انحراف اليد العرضي البسيط أثناء المشي المستقيم.</small></span>
+      <span>📐 <b>تثبيت الزوايا القائمة 90° وتجاهل اهتزاز اليد ودحرجة الدوران (WRO 2026)</b><br>
+        <small>يقرب أي دوران قريب من 90° أو 180° (بهامش ±12°) إلى زاوية قائمة دقيقة، ويتجاهل دحرجة العجلات العرضية عند لف الروبوت باليد وانحراف اليد أثناء المشي المستقيم.</small></span>
     </label>
     <label class="switch" for="chkAutoLine" style="margin-top:8px">
       <input type="checkbox" id="chkAutoLine" checked>
       <span>🎯 <b>الاكتشاف التلقائي للخط الأسود (<code>find_line</code> / <code>follow_line</code>)</b><br>
         <small>إذا توقفت فوق خط أسود متعامد (<code>T-end</code>) يسجّلها <code>find_line</code> تلقائيًا، وإذا مشيت فوق الخط الأسود لمسافة طويلة يسجّلها <code>follow_line</code> تلقائيًا.</small></span>
     </label>
-    <div class="row" style="margin-top:10px;margin-bottom:0">
-      <button id="btnClearPath" class="grow" style="border-color:#f59e0b;color:#fde68a" title="امسح كل الخطوات المسجلة وصفّر نقطة البداية عندما تعيد الروبوت إلى مربع START">🗑️ مسح المسار وتصفير نقطة البداية (START)</button>
-    </div>
   </div>
 
   <div class="dash">
@@ -465,6 +466,111 @@ let logLines = 0;          // عدد الأسطر المعروضة الآن
 let logTrimmed = 0;        // كم سطرًا قُصّ من الأعلى
 const telemetry = [];      // عيّنات # T بطوابع زمنية حقيقية (CSV)
 const bootTime = performance.now();
+const liveCmds = [];       // أوامر المسار المجمّعة لحظيًا في المتصفح لعرض الكود فورًا بلا ضغط على البلوتوث
+
+function buildLiveProgramText() {
+  // دمج الحركات المتتالية من نفس النوع (مثل merged_moves في الـ Hub)
+  const merged = [];
+  for (const raw of liveCmds) {
+    let m;
+    if ((m = raw.match(/^robot\.turn\((-?\d+)\)$/))) {
+      const v = parseInt(m[1], 10);
+      if (merged.length && merged[merged.length - 1].kind === "turn") merged[merged.length - 1].val += v;
+      else merged.push({ kind: "turn", val: v });
+    } else if ((m = raw.match(/^robot\.straight\((-?\d+)\)$/))) {
+      const v = parseInt(m[1], 10);
+      if (merged.length && merged[merged.length - 1].kind === "straight") merged[merged.length - 1].val += v;
+      else merged.push({ kind: "straight", val: v });
+    } else if ((m = raw.match(/^arm_motor\.run_angle\((\d+),\s*(-?\d+)\)$/))) {
+      const spd = parseInt(m[1], 10), v = parseInt(m[2], 10);
+      if (merged.length && merged[merged.length - 1].kind === "arm") merged[merged.length - 1].val += v;
+      else merged.push({ kind: "arm", spd, val: v });
+    } else {
+      merged.push({ kind: "other", text: raw });
+    }
+  }
+  const bodyLines = [];
+  let needLineHelpers = false;
+  for (const seg of merged) {
+    if (seg.kind === "turn" && seg.val !== 0) bodyLines.push("    robot.turn(" + seg.val + ")");
+    else if (seg.kind === "straight" && seg.val !== 0) bodyLines.push("    robot.straight(" + seg.val + ")");
+    else if (seg.kind === "arm" && seg.val !== 0) bodyLines.push("    arm_motor.run_angle(" + seg.spd + ", " + seg.val + ")");
+    else if (seg.kind === "other") {
+      bodyLines.push("    " + seg.text);
+      if (/^(find_line|follow_line|align_on_line)\(/.test(seg.text)) needLineHelpers = true;
+    }
+  }
+  const header = [
+    "# ==================================================",
+    "# برنامج السباق الذكي (" + liveCmds.length + " أمر مسجّل — تحديث تلقائي لحظي)",
+    "# ==================================================",
+    "from pybricks.hubs import PrimeHub",
+    "from pybricks.pupdevices import Motor, ColorSensor",
+    "from pybricks.parameters import Port, Direction",
+    "from pybricks.robotics import DriveBase",
+    "from pybricks.tools import wait",
+    "",
+    "hub = PrimeHub()",
+    "left_motor  = Motor(Port.A, Direction.COUNTERCLOCKWISE)",
+    "right_motor = Motor(Port.B)",
+    "arm_motor   = Motor(Port.D)  # محرك الذراع / المهام على المنفذ D",
+  ];
+  if (needLineHelpers) {
+    header.push("line_sensor = ColorSensor(Port.C)");
+  }
+  header.push(
+    "robot = DriveBase(left_motor, right_motor, 56, 110)",
+    "robot.use_gyro(True)",
+    "robot.settings(straight_acceleration=1200, turn_acceleration=1500)",
+    "robot.reset()",
+  );
+  if (needLineHelpers) {
+    header.push(
+      "",
+      "LINE_THRESHOLD = 45",
+      "",
+      "def find_line(direction=1, max_dist=250, speed=80):",
+      "    robot.reset()",
+      "    robot.drive(direction * speed, 0)",
+      "    while abs(robot.distance()) < max_dist:",
+      "        if line_sensor.reflection() < LINE_THRESHOLD:",
+      "            robot.stop()",
+      "            return True",
+      "        wait(10)",
+      "    robot.stop()",
+      "    return False",
+      "",
+      'def follow_line(dist, side="L", speed=90):',
+      '    sign = 1 if side == "L" else -1',
+      "    spd = speed if dist >= 0 else -speed",
+      "    robot.reset()",
+      "    while abs(robot.distance()) < abs(dist):",
+      "        error = line_sensor.reflection() - LINE_THRESHOLD",
+      "        robot.drive(spd, sign * (2.5) * error)",
+      "        wait(10)",
+      "    robot.stop()",
+    );
+  }
+  header.push(
+    "",
+    "def run():",
+    ...(bodyLines.length ? bodyLines : ["    pass"]),
+    "",
+    "run()",
+    "# --- نهاية المسار ---",
+    ""
+  );
+  return snapProgramAngles90(header.join("\n"));
+}
+function refreshLiveProgramPreview() {
+  if (!allowFill) return;
+  const p = buildLiveProgramText();
+  programText = p;
+  $("progOut").value = p;
+  $("progBadge").textContent = "تحديث تلقائي لحظي (" + liveCmds.length + " أمر) ✓";
+  $("progBadge").hidden = false;
+  $("progNote").hidden = true;
+}
 
 // يضع البرنامج في اللوحة ويحدّث الحالة
 function snapProgramAngles90(text) {
@@ -558,10 +664,10 @@ function appendLog(text) {
       const aliveVer = line.match(/# ✓ HUB_ALIVE v(\d+)/);
       if (aliveVer) hubVersion = aliveVer[1];
     }
-    if (hubVersion && Number(hubVersion) > 0 && Number(hubVersion) < 7) {
+    if (hubVersion && Number(hubVersion) > 0 && Number(hubVersion) < 9) {
       if ($("oldHubVer")) $("oldHubVer").textContent = "v" + hubVersion;
       if ($("needHubUpdate")) $("needHubUpdate").hidden = false;
-    } else if (hubVersion && Number(hubVersion) >= 7) {
+    } else if (hubVersion && Number(hubVersion) >= 9) {
       if ($("needHubUpdate")) $("needHubUpdate").hidden = true;
     }
     if (line.indexOf("لا يوجد محرك موصول على المنفذ D") >= 0) {
@@ -576,8 +682,11 @@ function appendLog(text) {
     }
     if (line.indexOf("# 🗑️ تم مسح المسار") === 0) {
       recorded = 0;
+      liveCmds.length = 0;
+      allowFill = true;
       countEl.textContent = "0";
-      showToast("🗑️ تم مسح المسار وتصفير نقطة البداية (START)", "ok", 3000);
+      refreshLiveProgramPreview();
+      showToast("🟢 تم تصفير المسار — حرّك الروبوت من مربع START وتوقف 0.6 ثانية عند كل نقطة", "ok", 3500);
     }
     // عيّنات # T تُحفظ بطابع زمني حقيقي (CSV) بدل الزمن التقديري
     const tel = line.match(/^# T d=(-?[\d.]+) h=(-?[\d.]+) C=([\d.]+)/);
@@ -590,11 +699,20 @@ function appendLog(text) {
       onTelemetryAutoRecord(Number(tel[1]), Number(tel[2]), Number(tel[3]));
     }
 
-    // عدّاد الأوامر المسجّلة: أسطر الحركة فقط (لا تُحسب أسطر تهيئة البرنامج المطبوعة)
-    if (/^(robot\.|arm_motor\.|find_line\(|align_on_line\(|follow_line\()/.test(line)
-        && !/^robot\.(reset|use_gyro|settings)\(/.test(line)) recorded++;
+    // عدّاد الأوامر المسجّلة وتحديث الكود اللحظي: أسطر الحركة غير المزاحة فقط (خارج #@@PROGRAM_BEGIN@@)
+    if (!progBuf
+        && /^(robot\.|arm_motor\.|find_line\(|align_on_line\(|follow_line\()/.test(line)
+        && !/^robot\.(reset|use_gyro|settings)\(/.test(line)) {
+      recorded++;
+      liveCmds.push(line.trim());
+      refreshLiveProgramPreview();
+    }
     // التراجع: الروبوت يطبع سطر "# حذف: …" لكل مقطع حُذف → نقصان واحد لكل سطر
-    if (/^#\s*(حذف|delete):/.test(line)) recorded = Math.max(0, recorded - 1);
+    if (!progBuf && /^#\s*(حذف|delete):/.test(line)) {
+      recorded = Math.max(0, recorded - 1);
+      if (liveCmds.length) liveCmds.pop();
+      refreshLiveProgramPreview();
+    }
   }
   if (!shown) { countEl.textContent = recorded; return; }
 
@@ -894,54 +1012,14 @@ $("chkAutoRead").addEventListener("change", e => {
 });
 
 // ===== التسجيل التلقائي الذكي للمسار بدون أزرار (WRO 2026) =====
-let webAutoRecTimer = null;
-let webSegStartD = null, webSegTotal = 0, webSegDark = 0, webSegStartDark = false;
-
 function onTelemetryAutoRecord(d, h, c) {
   const badge = $("autoRecBadge");
   const autoOn = !$("chkAutoRecord") || $("chkAutoRecord").checked;
   if (!autoOn) return;
   if (badge) {
-    badge.textContent = "— 🏃 جاري التحرك… توقف نصف ثانية لحفظ النقطة";
+    badge.textContent = "— 🏃 جاري التحرك… توقف 0.6 ثانية لحفظ النقطة";
     badge.style.color = "#fde68a";
   }
-  // إن كان الـ Hub يعمل بالنسخة v8 فما فوق، يقوم الـ Hub نفسه بالتسجيل التلقائي وطباعة البرنامج.
-  // أما إن كان الـ Hub يعمل بنسخة أقدم (< 8)، يقوم التطبيق هنا بالتسجيل التلقائي فور سكون حركة # T!
-  if (hubVersion && Number(hubVersion) >= 8) return;
-  if (!mode) return;
-
-  const th = 38;
-  if (webSegStartD === null) {
-    webSegStartD = d;
-    webSegStartDark = (c <= th);
-    webSegTotal = 0;
-    webSegDark = 0;
-  }
-  webSegTotal++;
-  if (c <= th) webSegDark++;
-
-  if (webAutoRecTimer) clearTimeout(webAutoRecTimer);
-  webAutoRecTimer = setTimeout(() => {
-    webAutoRecTimer = null;
-    if (!mode || ($("chkAutoRecord") && !$("chkAutoRecord").checked)) return;
-    const distMoved = Math.abs(d - (webSegStartD !== null ? webSegStartD : d));
-    const autoLine = !$("chkAutoLine") || $("chkAutoLine").checked;
-    let cmdToSend = "R";
-    if (autoLine && distMoved >= 120 && webSegTotal >= 3 && (webSegDark / webSegTotal) >= 0.55) {
-      cmdToSend = "T";
-    } else if (autoLine && distMoved >= 25 && c <= th && !webSegStartDark) {
-      cmdToSend = "F";
-    }
-    webSegStartD = null;
-    webSegTotal = 0;
-    webSegDark = 0;
-    sendCmd(cmdToSend);
-    setTimeout(() => { if (mode) sendCmd("C"); }, 180);
-    if (badge) {
-      badge.textContent = "— ✅ تم حفظ النقطة تلقائيًا!";
-      badge.style.color = "#86efac";
-    }
-  }, 600);
 }
 
 if ($("chkAutoRecord")) {
@@ -949,17 +1027,20 @@ if ($("chkAutoRecord")) {
     const on = e.target.checked;
     const badge = $("autoRecBadge");
     if (badge) {
-      badge.textContent = on ? "— نشط وجاهز" : "— متوقف (يدوي بالأزرار)";
+      badge.textContent = on ? "— نشط وجاهز (لمبة الـ Hub خضراء)" : "— متوقف مؤقتًا (آمن لنقل الروبوت)";
       badge.style.color = on ? "#86efac" : "var(--muted)";
     }
     if (mode) sendCmd(on ? "m" : "n");
-    showToast(on ? "🤖 التسجيل التلقائي الذكي للمسار: مفعّل" : "🤖 التسجيل التلقائي: متوقف (استخدم زر R للتسجيل اليدوي)");
+    showToast(on
+      ? "🟢 التسجيل التلقائي مفعّل — حرّك الروبوت وتوقف 0.6 ثانية لحفظ كل خطوة"
+      : "⏸️ التسجيل التلقائي متوقف — يمكنك الآن حمل الروبوت وإرجاعه إلى START بأمان");
   });
 }
 if ($("chkSnap90")) {
   $("chkSnap90").addEventListener("change", e => {
     const on = e.target.checked;
     if (mode) sendCmd(on ? "g" : "h");
+    if (liveCmds.length) refreshLiveProgramPreview();
     showToast(on ? "📐 تثبيت الزوايا القائمة 90°: مفعّل" : "📐 تثبيت الزوايا القائمة 90°: متوقف");
   });
 }
@@ -973,15 +1054,37 @@ if ($("chkAutoLine")) {
 if ($("btnClearPath")) {
   $("btnClearPath").addEventListener("click", () => {
     recorded = 0;
+    liveCmds.length = 0;
+    allowFill = true;
     countEl.textContent = "0";
-    programText = "";
-    $("progOut").value = "";
-    $("progBadge").hidden = true;
+    if ($("chkAutoRecord")) $("chkAutoRecord").checked = true;
+    if ($("autoRecBadge")) {
+      $("autoRecBadge").textContent = "— 🟢 نشط وجاهز من مربع START";
+      $("autoRecBadge").style.color = "#86efac";
+    }
+    refreshLiveProgramPreview();
     if (mode) {
       sendCmd("0");
-      showToast("🗑️ تم مسح المسار وتصفير نقطة القياس — ابدأ تحريك الروبوت من مربع START", "ok", 4000);
+      showToast("🟢 تم بدء مسار تلقائي جديد من START — حرّك الروبوت وتوقف 0.6 ثانية عند كل محطة", "ok", 4000);
     } else {
-      showToast("🗑️ تم تفريغ المسار في التطبيق", "ok", 2500);
+      showToast("🗑️ تم تصفير المسار في التطبيق — اتصل بالروبوت للبدء", "ok", 2500);
+    }
+  });
+}
+if ($("btnFinishAutoPath")) {
+  $("btnFinishAutoPath").addEventListener("click", () => {
+    if ($("chkAutoRecord")) $("chkAutoRecord").checked = false;
+    if ($("autoRecBadge")) {
+      $("autoRecBadge").textContent = "— ⏹ اكتمل التسجيل (آمن لحمل الروبوت إلى START)";
+      $("autoRecBadge").style.color = "#93c5fd";
+    }
+    if (mode) {
+      sendCmd("n");
+      setTimeout(() => { if (mode) sendCmd("C"); }, 120);
+      showToast("✅ تم إيقاف التسجيل التلقائي وتثبيت الكود — يمكنك الآن إرجاع الروبوت إلى START وتشغيله!", "ok", 5000);
+    } else {
+      refreshLiveProgramPreview();
+      showToast("✅ تم تثبيت الكود في اللوحة السفلية", "ok", 3000);
     }
   });
 }
@@ -1050,7 +1153,7 @@ if ($("btnCopyHubScript")) {
   $("btnCopyHubScript").onclick = async () => {
     const code = await fetchHubScript();
     if (!code) return;
-    copyText(code, "✅ تم نسخ كود as3_app.py (v8) — افتح code.pybricks.com والصقه وشغّله على الـ Hub مرة واحدة!");
+    copyText(code, "✅ تم نسخ كود as3_app.py (v9) — افتح code.pybricks.com والصقه وشغّله على الـ Hub مرة واحدة!");
   };
 }
 if ($("btnDownloadHubScript")) {
@@ -1058,7 +1161,7 @@ if ($("btnDownloadHubScript")) {
     const code = await fetchHubScript();
     if (!code) return;
     downloadText("as3_app.py", code, "text/x-python");
-    showToast("⬇️ تم تنزيل as3_app.py (v8) — ارفعه إلى الـ Hub عبر code.pybricks.com", "ok", 5000);
+    showToast("⬇️ تم تنزيل as3_app.py (v9) — ارفعه إلى الـ Hub عبر code.pybricks.com", "ok", 5000);
   };
 }
 // ===== ربط الواجهة =====
