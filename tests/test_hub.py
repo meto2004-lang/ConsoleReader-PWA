@@ -587,11 +587,16 @@ class ExecutionTests(unittest.TestCase):
         m.do_undo()
         self.assertEqual(m.last_arm_angle, 0)
 
-        # التحكم عن بعد بمحرك المنفذ D (u / j)
+        # التحكم عن بعد بمحرك المنفذ D (u / j):
+        # عند النقر السريع (وصول u ثم x في نفس الدورة) يستمر المحرك لـ RC_ARM_MIN_FRAMES دورات
+        # حتى يتحرك الذراع فعليًا بدل التوقف في 0ms، ثم يتوقف تلقائيًا.
         hub_loader.feed(m, "u")
         self.assertTrue(m.rc_arm_driving)
         self.assertEqual(m.arm_motor.calls[-1], ("run", m.RC_ARM_SPEED))
         hub_loader.feed(m, "x")
+        self.assertTrue(m.rc_arm_driving)
+        for _ in range(m.RC_ARM_MIN_FRAMES):
+            m.rc_tick()
         self.assertFalse(m.rc_arm_driving)
 
         # استلام وتنفيذ أمر محرك المنفذ D (M <angle>)

@@ -10,7 +10,7 @@
    إصدار كشبكة أمان ثانية.
 */
 
-const CACHE = "consolereader-v11";
+const CACHE = "consolereader-v12";
 
 const ASSETS = [
   "./",
@@ -41,8 +41,7 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-/* الجلب: من الذاكرة أولًا (يعمل دون إنترنت)، مع تحديث في الخلفية (stale-while-revalidate).
-   طلبات التنقّل تُخدم بصفحة التطبيق دائمًا — حتى لو طُلب مسار غير موجود. */
+/* الجلب: لطلبات التنقّل وملفات .py نجلب النسخة الأحدث من الشبكة أولًا مع الرجوع للذاكرة عند انقطاع الإنترنت. */
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   const isNavigate = e.request.mode === "navigate";
@@ -53,13 +52,10 @@ self.addEventListener("fetch", (e) => {
 async function respond(cachedKey, original, isNavigate) {
   const cached = await caches.match(cachedKey, { ignoreSearch: true });
 
-  // يبدأ التحديث في الخلفية دون انتظار — فلا يؤخّر العرض.
   const updating = fetch(original)
     .then((res) => {
       if (res && res.status === 200 && res.type === "basic") {
         if (isNavigate) {
-          // الصفحة نفسها: نحدّث المفتاح الذي يُخدَم منه التنقّل، وإلا بقي
-          // المستخدم على نسخة قديمة للأبد (انظر الملاحظة في أعلى الملف).
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put("./index.html", copy)).catch(() => {});
         }
@@ -69,6 +65,11 @@ async function respond(cachedKey, original, isNavigate) {
       return res;
     })
     .catch(() => null);
+
+  if (isNavigate || original.url.includes(".py")) {
+    const net = await updating;
+    if (net) return net;
+  }
 
   if (cached) return cached;
 
