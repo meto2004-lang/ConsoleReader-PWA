@@ -74,7 +74,7 @@ robot = DriveBase(left_motor, right_motor, WHEEL_DIAMETER, AXLE_TRACK)
 robot.use_gyro(True)  # نفس إعداد برنامج السباق (جيرو مفعّل)
 
 # إصدار برنامج الـ Hub — يظهر في سجل التطبيق ليعرف المستخدم أن النسخة محدَّثة
-HUB_VERSION = "7"
+HUB_VERSION = "8"
 
 # عتبات دنيا تتجاهل اهتزاز اليد
 MIN_DIST    = 5    # أقل من 5 مم = ضجيج
@@ -878,10 +878,20 @@ def resync_tracking():
     # بعد التشغيل: نُعيد نقطة القياس إلى موضع الروبوت الحالي
     # حتى لا يُسجَّل مسار التنفيذ كأنه حركة يدوية في التسجيل التالي
     global last_distance, last_heading, last_arm_angle
+    global watch_d, watch_h, watch_arm, auto_moving, auto_move_mode, auto_idle_ticks
+    global seg_samples_total, seg_samples_dark
     last_distance  = robot.distance()
     last_heading   = hub.imu.heading()
     m = get_arm()
     last_arm_angle = m.angle() if m is not None else 0
+    watch_d = last_distance
+    watch_h = last_heading
+    watch_arm = last_arm_angle
+    auto_moving = False
+    auto_move_mode = None
+    auto_idle_ticks = 0
+    seg_samples_total = 0
+    seg_samples_dark = 0
 
 def _run_end(msg, freq):
     # brake وليس stop: التوقف الآمن يجب أن يكبح المحركات فورًا
@@ -1082,19 +1092,39 @@ def run_tick():
         run_phase = "start"
 
 # ---------------------------------------------------------
-# قراءة الحساسات تلقائيًا مع الحركة (بدل الضغط على LEFT/L)
+# قراءة الحساسات والتسجيل التلقائي الذكي للمسار بدون أزرار (WRO 2026)
 #   - تُجمع العينات دائمًا في الخلفية (تُحسّن حساب عتبة الخط).
 #   - ويُبثّ سطر قياس في السجل أثناء الحركة فقط (بالأسهم أو باليد).
-#   - الأمر y يفعّل البث، و z يوقفه (من مفتاح التطبيق).
+#   - عند تفعيل AUTO_RECORD: يكتشف التوقف اللحظي (~0.5 ثانية) أو تغيّر نوع
+#     الحركة (دوران ← مستقيم ← ذراع) فيسجّل الخطوة تلقائيًا، مع تثبيت
+#     الزوايا القريبة من 90° واكتشاف الخط الأسود (find_line / follow_line)
+#     وتحديث كود السباق في التطبيق مباشرةً.
 # ---------------------------------------------------------
-AUTO_SAMPLE_EVERY = 3     # كل 3 دورات ≈ 100ms
-AUTO_STREAM       = True  # بثّ القراءات في السجل أثناء الحركة
-MOVE_EPS_DIST     = 8     # مم — أقل من ذلك يُعدّ سكونًا (يد)
-MOVE_EPS_ANG      = 3     # درجة
+AUTO_SAMPLE_EVERY  = 3     # كل 3 دورات ≈ 100ms
+AUTO_STREAM        = True  # بثّ القراءات في السجل أثناء الحركة
+MOVE_EPS_DIST      = 8     # مم — أقل من ذلك يُعدّ سكونًا (يد)
+MOVE_EPS_ANG       = 3     # درجة
+MOVE_EPS_ARM       = 5     # درجات محرك المنفذ D
+
+AUTO_RECORD        = True  # التسجيل التلقائي الذكي للمسار بدون ضغط أزرار (m تشغيل / n إيقاف)
+SNAP_90            = True  # تثبيت الزوايا القائمة 90°/180° لبساط WRO 2026 (g تشغيل / h إيقاف)
+AUTO_LINE_DETECT   = True  # اكتشاف الخط الأسود تلقائيًا find_line / follow_line (i تشغيل / o إيقاف)
+AUTO_PRINT_PROG    = True  # تحديث الكود في التطبيق تلقائيًا بعد كل نقطة مسجّلة
+AUTO_SETTLE_TICKS  = 5     # 5 قراءات سكون متتالية (~0.5 ثانية) = حفظ النقطة تلقائيًا
+SNAP_90_TOL        = 10    # هامش تثبيت الزاوية القائمة (±10 درجات حول مضاعفات 90°)
+STRAIGHT_DRIFT_MAX = 5     # تجاهل انحراف اليد العرضي (< 5 درجات) أثناء الدفع المستقيم الطويل
+FOLLOW_DARK_RATIO  = 0.55  # نسبة القراءات الداكنة لاعتبار المشي الطويل (≥120مم) تتبع خط follow_line
 
 auto_tick = 0
 watch_d = 0
 watch_h = 0
+watch_arm = 0
+auto_moving = False
+auto_move_mode = None
+auto_idle_ticks = 0
+seg_samples_total = 0
+seg_samples_dark = 0
+seg_start_dark = False
 
 def sample_sensors(keep):
     # يقرأ الحسّاس الوحيد، ويضيف العينة لنطاق المعايرة إذا طُلب.
@@ -1104,9 +1134,120 @@ def sample_sensors(keep):
         refl.add(v)
     return v
 
+def snap_turn_angle(diff_head):
+    # تثبيت الزوايا القريبة من مضاعفات 90° لبساط WRO 2026 (كل تقاطعاته 90°)
+    deg = int(round(diff_head))
+    if not SNAP_90:
+        return deg, False
+    nearest_90 = int(round(diff_head / 90.0)) * 90
+    if nearest_90 != 0 and abs(diff_head - nearest_90) <= SNAP_90_TOL:
+        return nearest_90, (deg != nearest_90)
+    return deg, False
+
+def _active_line_threshold():
+    th = th_pinned
+    if th is None:
+        th = estimated_threshold()
+    if th is None:
+        th = 35
+    return th
+
+def do_auto_record_segment(curr_refl=None, mode_switch=False):
+    global last_distance, last_heading, last_arm_angle
+    global seg_samples_total, seg_samples_dark, seg_start_dark
+    curr_distance = robot.distance()
+    curr_heading  = hub.imu.heading()
+    m = get_arm()
+    curr_arm      = m.angle() if m is not None else last_arm_angle
+
+    diff_dist = curr_distance - last_distance
+    diff_head = curr_heading - last_heading
+    diff_arm  = curr_arm - last_arm_angle
+
+    # تجاهل انحراف اليد العرضي (< STRAIGHT_DRIFT_MAX) أثناء الدفع المستقيم
+    ignore_drift = (SNAP_90 and abs(diff_dist) >= 50 and abs(diff_head) < STRAIGHT_DRIFT_MAX)
+
+    segs = []
+    did_turn = False
+    did_straight = False
+    did_line = False
+    did_arm = False
+    snapped_turn = None
+
+    if not ignore_drift and abs(diff_head) >= MIN_ANG:
+        turn_deg, was_snapped = snap_turn_angle(diff_head)
+        if was_snapped:
+            print("# 📐 تثبيت تلقائي للزاوية القائمة: " + str(int(round(diff_head))) + "° ← " + str(turn_deg) + "°")
+        segs.append(("turn", turn_deg))
+        snapped_turn = turn_deg
+        did_turn = True
+
+    th = _active_line_threshold()
+
+    if abs(diff_dist) >= MIN_DIST:
+        dist_int = int(round(diff_dist))
+        if (AUTO_LINE_DETECT and abs(dist_int) >= 120 and seg_samples_total >= 3
+                and (seg_samples_dark / seg_samples_total) >= FOLLOW_DARK_RATIO):
+            print("# 〰️ اكتشاف تلقائي لتتبع الخط الأسود ← follow_line")
+            segs.append(("follow_line", (dist_int, FOLLOW_SIDE)))
+            did_line = True
+        elif (AUTO_LINE_DETECT and curr_refl is not None and curr_refl <= th
+                and not seg_start_dark and not mode_switch):
+            direction = 1 if dist_int >= 0 else -1
+            max_dist = max(abs(dist_int) + SEARCH_MARGIN, MIN_SEARCH)
+            print("# 🎯 اكتشاف تلقائي لخط التوقف الأسود ← find_line")
+            segs.append(("find_line", (direction, max_dist)))
+            did_line = True
+        else:
+            segs.append(("straight", dist_int))
+            did_straight = True
+
+    if abs(diff_arm) >= MIN_ARM_ANG:
+        segs.append(("arm", int(round(diff_arm))))
+        did_arm = True
+
+    seg_samples_total = 0
+    seg_samples_dark = 0
+    seg_start_dark = (curr_refl is not None and curr_refl <= th)
+
+    if not segs:
+        return False
+
+    if push_action("move", segs, last_distance, last_heading, last_arm_angle):
+        print("# ✨ تسجيل تلقائي:")
+        for seg in segs:
+            print(format_seg(seg))
+        last_distance = curr_distance
+        if snapped_turn is not None:
+            # نربط الزاوية المرجعية بالزاوية المثبّتة (90°/180°) لمنع تراكم خطأ اليد
+            if abs(curr_heading - (last_heading + snapped_turn)) <= SNAP_90_TOL:
+                last_heading = last_heading + snapped_turn
+            else:
+                last_heading = curr_heading
+        elif not ignore_drift:
+            last_heading = curr_heading
+        last_arm_angle = curr_arm
+
+        if did_arm:
+            hub.speaker.beep(700, 60)
+            hub.speaker.beep(950, 80)
+        elif did_line:
+            hub.speaker.beep(1050, 90)
+        elif did_turn:
+            hub.speaker.beep(850, 70)
+        elif did_straight:
+            hub.speaker.beep(650, 70)
+
+        if AUTO_PRINT_PROG and not mode_switch:
+            do_print_program()
+        return True
+    return False
+
 def auto_read_tick():
     # تُنادى كل دورة من الحلقة الرئيسية؛ تقرأ كل ~100ms
-    global auto_tick, watch_d, watch_h
+    global auto_tick, watch_d, watch_h, watch_arm
+    global auto_moving, auto_move_mode, auto_idle_ticks
+    global seg_samples_total, seg_samples_dark, seg_start_dark
     auto_tick += 1
     if auto_tick < AUTO_SAMPLE_EVERY:
         return
@@ -1114,17 +1255,76 @@ def auto_read_tick():
 
     d = robot.distance()
     h = hub.imu.heading()
-    hand_moved = abs(d - watch_d) >= MOVE_EPS_DIST or abs(h - watch_h) >= MOVE_EPS_ANG
+    m = get_arm()
+    a = m.angle() if m is not None else last_arm_angle
+
+    step_d = d - watch_d
+    step_h = h - watch_h
+    step_a = a - watch_arm
+
+    hand_moved = (abs(step_d) >= MOVE_EPS_DIST
+                  or abs(step_h) >= MOVE_EPS_ANG
+                  or abs(step_a) >= MOVE_EPS_ARM)
     watch_d = d
     watch_h = h
+    watch_arm = a
 
     v = sample_sensors(hand_moved or rc_driving)
 
     # أثناء تنفيذ الكود لا نبثّ سطر قياس لكل خطوة (لئلا يمتلئ السجل)،
     # فالتطبيق يعرض تقدّم التنفيذ سطرًا لكل مقطع.
-    if AUTO_STREAM and not run_active and (rc_driving or hand_moved):
+    if AUTO_STREAM and not run_active and (rc_driving or rc_arm_driving or hand_moved):
         # سطر مضغوط: d=المسافة h=الاتجاه C=انعكاس الحسّاس الوحيد
         print("# T d=" + str(int(d)) + " h=" + str(int(h)) + " C=" + str(v))
+
+    # --- آلة التسجيل التلقائي الذكي للمسار بدون أزرار ---
+    if not AUTO_RECORD or run_active or code_mode:
+        return
+
+    th = _active_line_threshold()
+
+    if abs(step_a) >= MOVE_EPS_ARM or rc_arm_driving:
+        cur_mode = "arm"
+    elif abs(step_h) >= MOVE_EPS_ANG and abs(step_d) < MOVE_EPS_DIST * 2:
+        cur_mode = "turn"
+    elif abs(step_d) >= MOVE_EPS_DIST or rc_driving:
+        cur_mode = "straight"
+    else:
+        cur_mode = None
+
+    if cur_mode is not None:
+        # إذا تغيّر نوع الحركة مباشرةً (مثلًا من دوران إلى مشي مستقيم أو تحريك الذراع)
+        # نسجّل المقطع السابق فورًا قبل بدء المقطع الجديد لضمان دقة الفصل
+        if auto_moving and auto_move_mode is not None and cur_mode != auto_move_mode:
+            has_prev = (
+                (auto_move_mode == "turn" and abs(h - step_h - last_heading) >= MIN_ANG * 2)
+                or (auto_move_mode == "straight" and abs(d - step_d - last_distance) >= MIN_DIST * 3)
+                or (auto_move_mode == "arm" and abs(a - step_a - last_arm_angle) >= MIN_ARM_ANG * 2)
+            )
+            if has_prev:
+                do_auto_record_segment(v, mode_switch=True)
+
+        if not auto_moving:
+            auto_moving = True
+            seg_start_dark = (v <= th)
+            seg_samples_total = 0
+            seg_samples_dark = 0
+
+        auto_move_mode = cur_mode
+        auto_idle_ticks = 0
+
+        if cur_mode == "straight":
+            seg_samples_total += 1
+            if v <= th:
+                seg_samples_dark += 1
+    else:
+        if auto_moving:
+            auto_idle_ticks += 1
+            if auto_idle_ticks >= AUTO_SETTLE_TICKS:
+                do_auto_record_segment(v, mode_switch=False)
+                auto_moving = False
+                auto_move_mode = None
+                auto_idle_ticks = 0
 
 MAX_ACTIONS = 60   # أقصى عدد تسجيلات (ذاكرة الـ Hub محدودة)
 
@@ -1160,17 +1360,44 @@ def do_undo():
         print("# لا يوجد ما يُحذف")
     hub.speaker.beep(400, 150)
 
+def do_clear_path():
+    # تصفير المسار بالكامل والبدء من موضع الروبوت الحالي (مربع START)
+    actions.clear()
+    resync_tracking()
+    print("# 🗑️ تم مسح المسار وتصفير نقطة القياس — جاهز للتدريب من جديد")
+    hub.speaker.beep(600, 80)
+    hub.speaker.beep(400, 100)
+    if AUTO_PRINT_PROG:
+        do_print_program()
+
 def do_find_line_point():
     global last_distance, last_heading
     # نقطة خط ذكية: تستبدل الحركة منذ آخر تسجيل ببحث دقيق عن الخط.
-    #   بالحسّاس الواحد لا نضيف محاذاة بعد find_line: فالحسّاس يكون على
-    #   الخط مباشرة بعد البحث، والمحاذاة تصبح بلا أثر (تُرجع فورًا).
+    #   وإذا كان التسجيل التلقائي قد سجّل الحركة للتو كمشي مستقيم، نحوّل آخر
+    #   مقطع مستقيم مسجّل إلى find_line مباشرةً.
     curr_distance = robot.distance()
     curr_heading = hub.imu.heading()
     diff_dist = curr_distance - last_distance
     diff_head = curr_heading - last_heading
 
     refl.add(line_sensor.reflection())
+
+    if abs(diff_dist) < MIN_DIST and abs(diff_head) < MIN_ANG and actions:
+        last_item = actions[-1]
+        if last_item[0] == "move" and last_item[1]:
+            last_seg = last_item[1][-1]
+            if last_seg[0] in ("straight", "follow_line"):
+                prev_d = last_seg[1] if last_seg[0] == "straight" else last_seg[1][0]
+                direction = 1 if prev_d >= 0 else -1
+                max_dist = max(abs(int(round(prev_d))) + SEARCH_MARGIN, MIN_SEARCH)
+                new_seg = ("find_line", (direction, max_dist))
+                print("# حذف: " + format_seg(last_seg))
+                last_item[1][-1] = new_seg
+                print(format_seg(new_seg))
+                hub.speaker.beep(500, 80)
+                if AUTO_PRINT_PROG:
+                    do_print_program()
+                return
 
     segs = []
     if abs(diff_head) >= MIN_ANG:
@@ -1196,6 +1423,21 @@ def do_follow_line_seg():
     diff_head = curr_heading - last_heading
 
     refl.add(line_sensor.reflection())
+
+    if abs(diff_dist) < MIN_DIST and abs(diff_head) < MIN_ANG and actions:
+        last_item = actions[-1]
+        if last_item[0] == "move" and last_item[1]:
+            last_seg = last_item[1][-1]
+            if last_seg[0] == "straight":
+                prev_d = int(round(last_seg[1]))
+                new_seg = ("follow_line", (prev_d, FOLLOW_SIDE))
+                print("# حذف: " + format_seg(last_seg))
+                last_item[1][-1] = new_seg
+                print(format_seg(new_seg))
+                hub.speaker.beep(550, 80)
+                if AUTO_PRINT_PROG:
+                    do_print_program()
+                return
 
     segs = []
     if abs(diff_head) >= MIN_ANG:
@@ -1281,7 +1523,8 @@ def do_print_program():
 
 def handle_app_command(cmd):
     # حرف واحد من التطبيق = نفس ضغطة الزر المقابلة على الروبوت
-    global AUTO_STREAM, code_mode, code_line, code_bad, beat_on
+    global AUTO_STREAM, AUTO_RECORD, SNAP_90, AUTO_LINE_DETECT
+    global code_mode, code_line, code_bad, beat_on
 
     # --- استلام الكود من التطبيق ---
     if code_mode:
@@ -1381,6 +1624,50 @@ def handle_app_command(cmd):
         AUTO_STREAM = False
         print("# القراءة التلقائية للحساسات: متوقفة")
         hub.speaker.beep(500, 60)
+        return
+
+    # --- التسجيل التلقائي الذكي بدون أزرار: m تشغيل / n إيقاف ---
+    if cmd == "m":
+        AUTO_RECORD = True
+        resync_tracking()
+        print("# 🤖 التسجيل التلقائي الذكي للمسار: مفعّل")
+        hub.speaker.beep(780, 60)
+        return
+    if cmd == "n":
+        AUTO_RECORD = False
+        print("# 🤖 التسجيل التلقائي الذكي للمسار: متوقف")
+        hub.speaker.beep(520, 60)
+        return
+
+    # --- تثبيت الزوايا القائمة 90° لبساط WRO 2026: g تشغيل / h إيقاف ---
+    if cmd == "g":
+        SNAP_90 = True
+        print("# 📐 تثبيت الزوايا القائمة 90°: مفعّل")
+        hub.speaker.beep(820, 60)
+        return
+    if cmd == "h":
+        SNAP_90 = False
+        print("# 📐 تثبيت الزوايا القائمة 90°: متوقف")
+        hub.speaker.beep(540, 60)
+        return
+
+    # --- الاكتشاف التلقائي للخط الأسود (find_line / follow_line): i تشغيل / o إيقاف ---
+    if cmd == "i":
+        AUTO_LINE_DETECT = True
+        print("# 🎯 الاكتشاف التلقائي للخط الأسود: مفعّل")
+        hub.speaker.beep(860, 60)
+        return
+    if cmd == "o":
+        AUTO_LINE_DETECT = False
+        print("# 🎯 الاكتشاف التلقائي للخط الأسود: متوقف")
+        hub.speaker.beep(560, 60)
+        return
+
+    # --- مسح المسار وتصفير نقطة البداية (مربع START): 0 ---
+    if cmd == "0":
+        if rc_driving or rc_arm_driving:
+            rc_halt_and_wait()
+        do_clear_path()
         return
 
     # --- التحكم عن بعد بالمحركات (الأسهم في التطبيق + محرك D) ---
