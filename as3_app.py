@@ -74,7 +74,7 @@ robot = DriveBase(left_motor, right_motor, WHEEL_DIAMETER, AXLE_TRACK)
 robot.use_gyro(True)  # نفس إعداد برنامج السباق (جيرو مفعّل)
 
 # إصدار برنامج الـ Hub — يظهر في سجل التطبيق ليعرف المستخدم أن النسخة محدَّثة
-HUB_VERSION = "8"
+HUB_VERSION = "9"
 
 # عتبات دنيا تتجاهل اهتزاز اليد
 MIN_DIST    = 5    # أقل من 5 مم = ضجيج
@@ -1102,17 +1102,26 @@ def run_tick():
 # ---------------------------------------------------------
 AUTO_SAMPLE_EVERY  = 3     # كل 3 دورات ≈ 100ms
 AUTO_STREAM        = True  # بثّ القراءات في السجل أثناء الحركة
-MOVE_EPS_DIST      = 8     # مم — أقل من ذلك يُعدّ سكونًا (يد)
-MOVE_EPS_ANG       = 3     # درجة
+MOVE_EPS_DIST      = 8     # مم — للبثّ في السجل
+MOVE_EPS_ANG       = 3     # درجة — للبثّ في السجل
 MOVE_EPS_ARM       = 5     # درجات محرك المنفذ D
+
+# عتبات السكون الدقيق والتسجيل التلقائي (تعمل حتى مع التحريك اليدوي الهادئ والبطيء)
+STILL_EPS_DIST     = 2     # مم لكل 100ms — أقل من ذلك يُعدّ الروبوت ساكنًا تمامًا
+STILL_EPS_ANG      = 1     # درجة لكل 100ms
+STILL_EPS_ARM      = 2     # درجتان لكل 100ms على محرك الذراع D
+AUTO_MIN_DIST      = 15    # مم — أقل مسافة تُسجَّل تلقائيًا (يتجاهل اهتزاز اللمس)
+AUTO_MIN_ANG       = 5     # درجات — أقل زاوية دوران تُسجَّل تلقائيًا
+AUTO_MIN_ARM       = 8     # درجات — أقل حركة ذراع تُسجَّل تلقائيًا
+TURN_PIVOT_ROLL_MAX = 40   # مم — تجاهل دحرجة العجلات العرضية (< 40مم) أثناء تدوير الروبوت باليد (≥ 25°)
 
 AUTO_RECORD        = True  # التسجيل التلقائي الذكي للمسار بدون ضغط أزرار (m تشغيل / n إيقاف)
 SNAP_90            = True  # تثبيت الزوايا القائمة 90°/180° لبساط WRO 2026 (g تشغيل / h إيقاف)
 AUTO_LINE_DETECT   = True  # اكتشاف الخط الأسود تلقائيًا find_line / follow_line (i تشغيل / o إيقاف)
-AUTO_PRINT_PROG    = True  # تحديث الكود في التطبيق تلقائيًا بعد كل نقطة مسجّلة
-AUTO_SETTLE_TICKS  = 5     # 5 قراءات سكون متتالية (~0.5 ثانية) = حفظ النقطة تلقائيًا
-SNAP_90_TOL        = 10    # هامش تثبيت الزاوية القائمة (±10 درجات حول مضاعفات 90°)
-STRAIGHT_DRIFT_MAX = 5     # تجاهل انحراف اليد العرضي (< 5 درجات) أثناء الدفع المستقيم الطويل
+AUTO_PRINT_PROG    = False # لا نطبع 80 سطرًا بعد كل خطوة لمنع تجمّد البلوتوث؛ التطبيق يحدّث الكود لحظيًا
+AUTO_SETTLE_TICKS  = 6     # 6 قراءات سكون متتالية (~0.6 ثانية) = حفظ النقطة تلقائيًا
+SNAP_90_TOL        = 12    # هامش تثبيت الزاوية القائمة (±12 درجة حول مضاعفات 90°)
+STRAIGHT_DRIFT_MAX = 7     # تجاهل انحراف اليد العرضي (< 7 درجات) أثناء الدفع المستقيم
 FOLLOW_DARK_RATIO  = 0.55  # نسبة القراءات الداكنة لاعتبار المشي الطويل (≥120مم) تتبع خط follow_line
 
 auto_tick = 0
@@ -1149,7 +1158,7 @@ def _active_line_threshold():
     if th is None:
         th = estimated_threshold()
     if th is None:
-        th = 35
+        th = 22
     return th
 
 def do_auto_record_segment(curr_refl=None, mode_switch=False):
@@ -1164,8 +1173,10 @@ def do_auto_record_segment(curr_refl=None, mode_switch=False):
     diff_head = curr_heading - last_heading
     diff_arm  = curr_arm - last_arm_angle
 
-    # تجاهل انحراف اليد العرضي (< STRAIGHT_DRIFT_MAX) أثناء الدفع المستقيم
-    ignore_drift = (SNAP_90 and abs(diff_dist) >= 50 and abs(diff_head) < STRAIGHT_DRIFT_MAX)
+    # 1) تجاهل انحراف اليد العرضي (< STRAIGHT_DRIFT_MAX) أثناء الدفع المستقيم
+    ignore_drift = (SNAP_90 and abs(diff_dist) >= 45 and abs(diff_head) < STRAIGHT_DRIFT_MAX)
+    # 2) تجاهل دحرجة العجلات العرضية (< TURN_PIVOT_ROLL_MAX) أثناء لف الروبوت باليد في مكانه
+    ignore_pivot_roll = (abs(diff_head) >= 25 and abs(diff_dist) < TURN_PIVOT_ROLL_MAX)
 
     segs = []
     did_turn = False
@@ -1174,7 +1185,7 @@ def do_auto_record_segment(curr_refl=None, mode_switch=False):
     did_arm = False
     snapped_turn = None
 
-    if not ignore_drift and abs(diff_head) >= MIN_ANG:
+    if not ignore_drift and abs(diff_head) >= AUTO_MIN_ANG:
         turn_deg, was_snapped = snap_turn_angle(diff_head)
         if was_snapped:
             print("# 📐 تثبيت تلقائي للزاوية القائمة: " + str(int(round(diff_head))) + "° ← " + str(turn_deg) + "°")
@@ -1184,7 +1195,7 @@ def do_auto_record_segment(curr_refl=None, mode_switch=False):
 
     th = _active_line_threshold()
 
-    if abs(diff_dist) >= MIN_DIST:
+    if not ignore_pivot_roll and abs(diff_dist) >= AUTO_MIN_DIST:
         dist_int = int(round(diff_dist))
         if (AUTO_LINE_DETECT and abs(dist_int) >= 120 and seg_samples_total >= 3
                 and (seg_samples_dark / seg_samples_total) >= FOLLOW_DARK_RATIO):
@@ -1202,7 +1213,7 @@ def do_auto_record_segment(curr_refl=None, mode_switch=False):
             segs.append(("straight", dist_int))
             did_straight = True
 
-    if abs(diff_arm) >= MIN_ARM_ANG:
+    if abs(diff_arm) >= AUTO_MIN_ARM:
         segs.append(("arm", int(round(diff_arm))))
         did_arm = True
 
@@ -1229,14 +1240,14 @@ def do_auto_record_segment(curr_refl=None, mode_switch=False):
         last_arm_angle = curr_arm
 
         if did_arm:
-            hub.speaker.beep(700, 60)
-            hub.speaker.beep(950, 80)
+            hub.speaker.beep(700, 50)
+            hub.speaker.beep(950, 60)
         elif did_line:
-            hub.speaker.beep(1050, 90)
+            hub.speaker.beep(1050, 65)
         elif did_turn:
-            hub.speaker.beep(850, 70)
+            hub.speaker.beep(850, 55)
         elif did_straight:
-            hub.speaker.beep(650, 70)
+            hub.speaker.beep(650, 55)
 
         if AUTO_PRINT_PROG and not mode_switch:
             do_print_program()
@@ -1283,48 +1294,42 @@ def auto_read_tick():
 
     th = _active_line_threshold()
 
-    if abs(step_a) >= MOVE_EPS_ARM or rc_arm_driving:
-        cur_mode = "arm"
-    elif abs(step_h) >= MOVE_EPS_ANG and abs(step_d) < MOVE_EPS_DIST * 2:
-        cur_mode = "turn"
-    elif abs(step_d) >= MOVE_EPS_DIST or rc_driving:
-        cur_mode = "straight"
-    else:
-        cur_mode = None
+    # هل ابتعد الروبوت أو الذراع عن آخر نقطة مسجّلة؟ (يكتشف حتى التحريك اليدوي الهادئ والبطيء)
+    total_d = d - last_distance
+    total_h = h - last_heading
+    total_a = a - last_arm_angle
+    displaced = (abs(total_d) >= AUTO_MIN_DIST
+                 or abs(total_h) >= AUTO_MIN_ANG
+                 or abs(total_a) >= AUTO_MIN_ARM)
 
-    if cur_mode is not None:
-        # إذا تغيّر نوع الحركة مباشرةً (مثلًا من دوران إلى مشي مستقيم أو تحريك الذراع)
-        # نسجّل المقطع السابق فورًا قبل بدء المقطع الجديد لضمان دقة الفصل
-        if auto_moving and auto_move_mode is not None and cur_mode != auto_move_mode:
-            has_prev = (
-                (auto_move_mode == "turn" and abs(h - step_h - last_heading) >= MIN_ANG * 2)
-                or (auto_move_mode == "straight" and abs(d - step_d - last_distance) >= MIN_DIST * 3)
-                or (auto_move_mode == "arm" and abs(a - step_a - last_arm_angle) >= MIN_ARM_ANG * 2)
-            )
-            if has_prev:
-                do_auto_record_segment(v, mode_switch=True)
+    # هل الروبوت والذراع ساكنان تمامًا في هذه اللحظة؟
+    is_still_now = (abs(step_d) <= STILL_EPS_DIST
+                    and abs(step_h) <= STILL_EPS_ANG
+                    and abs(step_a) <= STILL_EPS_ARM
+                    and not rc_driving
+                    and not rc_arm_driving)
 
+    if not is_still_now or (displaced and not auto_moving):
         if not auto_moving:
             auto_moving = True
             seg_start_dark = (v <= th)
             seg_samples_total = 0
             seg_samples_dark = 0
+        if not is_still_now:
+            auto_idle_ticks = 0
+            if abs(step_d) > STILL_EPS_DIST or rc_driving:
+                seg_samples_total += 1
+                if v <= th:
+                    seg_samples_dark += 1
+            return
 
-        auto_move_mode = cur_mode
-        auto_idle_ticks = 0
-
-        if cur_mode == "straight":
-            seg_samples_total += 1
-            if v <= th:
-                seg_samples_dark += 1
-    else:
-        if auto_moving:
-            auto_idle_ticks += 1
-            if auto_idle_ticks >= AUTO_SETTLE_TICKS:
-                do_auto_record_segment(v, mode_switch=False)
-                auto_moving = False
-                auto_move_mode = None
-                auto_idle_ticks = 0
+    if auto_moving and is_still_now:
+        auto_idle_ticks += 1
+        if auto_idle_ticks >= AUTO_SETTLE_TICKS:
+            do_auto_record_segment(v, mode_switch=False)
+            auto_moving = False
+            auto_move_mode = None
+            auto_idle_ticks = 0
 
 MAX_ACTIONS = 60   # أقصى عدد تسجيلات (ذاكرة الـ Hub محدودة)
 
@@ -1362,8 +1367,11 @@ def do_undo():
 
 def do_clear_path():
     # تصفير المسار بالكامل والبدء من موضع الروبوت الحالي (مربع START)
+    global AUTO_RECORD
     actions.clear()
     resync_tracking()
+    AUTO_RECORD = True
+    hub.light.on(Color.GREEN)
     print("# 🗑️ تم مسح المسار وتصفير نقطة القياس — جاهز للتدريب من جديد")
     hub.speaker.beep(600, 80)
     hub.speaker.beep(400, 100)
@@ -1630,11 +1638,16 @@ def handle_app_command(cmd):
     if cmd == "m":
         AUTO_RECORD = True
         resync_tracking()
+        hub.light.on(Color.GREEN)
         print("# 🤖 التسجيل التلقائي الذكي للمسار: مفعّل")
         hub.speaker.beep(780, 60)
         return
     if cmd == "n":
+        if auto_moving:
+            do_auto_record_segment(line_sensor.reflection(), mode_switch=False)
         AUTO_RECORD = False
+        resync_tracking()
+        hub.light.on(Color.BLUE)
         print("# 🤖 التسجيل التلقائي الذكي للمسار: متوقف")
         hub.speaker.beep(520, 60)
         return
