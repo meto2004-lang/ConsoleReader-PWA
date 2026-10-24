@@ -12,9 +12,14 @@ hub = PrimeHub()
 left_motor  = Motor(Port.A, Direction.COUNTERCLOCKWISE)  # عدّل الاتجاه إذا لزم
 right_motor = Motor(Port.B)
 
+# محرك إضافي (ذراع / بوابة / مهام) على المنفذ D
+ARM_PORT        = Port.D
+ARM_PORT_LETTER = "D"          # يُطبع في البرنامج الناتج
+arm_motor = Motor(ARM_PORT)
+
 # حساس ألوان واحد فقط، مركّب على المنفذ C.
 #   كل القراءات (عتبة الخط، البحث عن الخط، المحاذاة، متابعة الحافة) تعتمد
-#   على هذا الحسّاس وحده — لا يوجد حسّاس على D. غيّر LINE_PORT فقط إن كان
+#   على هذا الحسّاس وحده — لا يوجد حسّاس ألوان على D. غيّر LINE_PORT فقط إن كان
 #   الحسّاس في منفذ آخر.
 LINE_PORT        = Port.C
 LINE_PORT_LETTER = "C"          # نفس المنفذ أعلاه — يُطبع في البرنامج الناتج
@@ -23,15 +28,17 @@ line_sensor = ColorSensor(LINE_PORT)
 # =========================================================
 # 2) أبعاد الروبوت (عدّلها لاحقاً للمعايرة الدقيقة)
 # =========================================================
-WHEEL_DIAMETER = 62.4
+WHEEL_DIAMETER = 56
 AXLE_TRACK     = 110
 
 robot = DriveBase(left_motor, right_motor, WHEEL_DIAMETER, AXLE_TRACK)
 robot.use_gyro(True)  # نفس إعداد برنامج السباق (جيرو مفعّل)
 
 # عتبات دنيا تتجاهل اهتزاز اليد
-MIN_DIST = 5  # أقل من 5 مم = ضجيج
-MIN_ANG  = 2  # أقل من درجتين = ضجيج
+MIN_DIST    = 5    # أقل من 5 مم = ضجيج
+MIN_ANG     = 2    # أقل من درجتين = ضجيج
+MIN_ARM_ANG = 5    # أقل من 5 درجات على محرك المنفذ D = ضجيج
+ARM_SPEED   = 300  # سرعة محرك المنفذ D في البرنامج الناتج (deg/s)
 
 # إعدادات التصحيح الذكي
 SEARCH_MARGIN = 50   # هامش بحث إضافي بعد المسافة المجرَّبة (مم)
@@ -109,6 +116,7 @@ def setup_lines(include_sensors):
         "hub = PrimeHub()",
         "left_motor  = Motor(Port.A, Direction.COUNTERCLOCKWISE)",
         "right_motor = Motor(Port.B)",
+        "arm_motor   = Motor(Port." + ARM_PORT_LETTER + ")  # محرك الذراع / المهام على المنفذ D",
     ]
     if include_sensors:
         # حساس واحد فقط (المنفذ C) — نفس إعداد نسخة الـ Hub
@@ -196,6 +204,8 @@ def format_seg(seg):
         return "robot.turn(" + str(val) + ")"
     if kind == "straight":
         return "robot.straight(" + str(val) + ")"
+    if kind == "arm":
+        return "arm_motor.run_angle(" + str(ARM_SPEED) + ", " + str(val) + ")"
     if kind == "find_line":
         direction, max_dist = val
         return "find_line(" + str(direction) + ", " + str(max_dist) + ")"
@@ -211,11 +221,12 @@ def merged_moves():
     # يدمج الحركات المتتالية من نفس النوع فقط (turn + turn مثلاً).
     # القطع الذكية تبقى كما هي لأنها معالم مستقلة على المسار.
     merged = []
-    for kind, content, _, _ in actions:
+    for item in actions:
+        kind, content = item[0], item[1]
         if kind != "move":
             continue
         for seg in content:
-            if seg[0] in ("turn", "straight") and merged and merged[-1][0] == seg[0]:
+            if seg[0] in ("turn", "straight", "arm") and merged and merged[-1][0] == seg[0]:
                 merged[-1] = (seg[0], merged[-1][1] + seg[1])
             else:
                 merged.append((seg[0], seg[1]))
@@ -223,7 +234,7 @@ def merged_moves():
 
 MAX_ACTIONS = 60   # أقصى عدد تسجيلات (ذاكرة الـ Hub محدودة)
 
-def push_action(kind, content, prev_dist=None, prev_head=None):
+def push_action(kind, content, prev_dist=None, prev_head=None, prev_arm=None):
     # يضيف تسجيلًا مع احترام الحد الأقصى؛ يعيد False إن رُفض.
     # عند الرفض لا نحرّك نقطة القياس: الحركة تبقى «غير مسجَّلة» فيلتقطها
     # التسجيل التالي بدل أن تُفقد بصمت.
@@ -232,7 +243,7 @@ def push_action(kind, content, prev_dist=None, prev_head=None):
               + ") — احذف بعضها بـ U ثم أعد المحاولة")
         hub.speaker.beep(250, 250)
         return False
-    actions.append((kind, content, prev_dist, prev_head))
+    actions.append((kind, content, prev_dist, prev_head, prev_arm))
     return True
 
 def print_full_program():
@@ -241,7 +252,8 @@ def print_full_program():
     n_cmds = 0
     include_sensors = False
     include_helpers = False
-    for kind, content, _, _ in actions:
+    for item in actions:
+        kind, content = item[0], item[1]
         if kind == "move":
             n_cmds += len(content)
             for seg in content:
@@ -266,7 +278,7 @@ def print_full_program():
     print("def run():")
     printed = False
     for seg in merged_moves():
-        if seg[0] in ("turn", "straight") and seg[1] == 0:
+        if seg[0] in ("turn", "straight", "arm") and seg[1] == 0:
             continue  # قطعان متعاكسان أُلغيَا
         print("    " + format_seg(seg))
         printed = True
@@ -279,7 +291,8 @@ def print_full_program():
     if include_sensors:
         print("#")
         print("# --- ملاحظات المعايرة: قراءات الحساسات أثناء التدريب ---")
-        for kind, content, _, _ in actions:
+        for item in actions:
+            kind, content = item[0], item[1]
             if kind == "sensor":
                 for line in content:
                     print(line)
@@ -307,17 +320,20 @@ for line in setup_lines(False):
 
 left_motor.stop()   # coast: تُترك المحركات حرة ليُدفع الروبوت باليد
 right_motor.stop()
+arm_motor.stop()    # coast: يُترك محرك المنفذ D حراً لتحريك الذراع باليد
+arm_motor.reset_angle(0)
 
 robot.reset()  # تصفير عدادات المسافة والزاوية (والجيرو)
 
-last_distance = robot.distance()
-last_heading  = hub.imu.heading()
+last_distance  = robot.distance()
+last_heading   = hub.imu.heading()
+last_arm_angle = arm_motor.angle()
 
 hub.light.on(Color.BLUE)
 print("")
 print("# جاهز:")
 print("# حرّك الروبوت بيدك ثم اضغط:")
-print("# - RIGHT       : تسجيل حركة (دوران ثم مستقيم)")
+print("# - RIGHT       : تسجيل حركة (دوران ثم مستقيم + محرك D)")
 print("# - LEFT        : تسجيل قراءة الحسّاس (لحساب عتاة الخط)")
 print("# - CENTER+LEFT : نقطة خط ذكية find_line (+ محاذاة) بدل آخر مستقيم")
 print("# - CENTER+RIGHT: مقطع متابعة خط follow_line بآخر مسافة")
@@ -331,13 +347,16 @@ try:
         if Button.LEFT in pressed and Button.RIGHT in pressed:
             # تراجع: يحذف كل ما أضافته آخر ضغطة دفعة واحدة ويعيد المرجع السابق
             if actions:
-                kind, content, prev_dist, prev_head = actions.pop()
+                item = actions.pop()
+                kind, content, prev_dist, prev_head = item[0], item[1], item[2], item[3]
+                prev_arm = item[4] if len(item) > 4 and item[4] is not None else last_arm_angle
                 if kind == "move":
                     for seg in content:
                         print("# حذف: " + format_seg(seg))
                     # إرجاع نقطة القياس حتى يمكن إعادة تسجيل نفس الحركة
-                    last_distance = prev_dist
-                    last_heading  = prev_head
+                    last_distance  = prev_dist
+                    last_heading   = prev_head
+                    last_arm_angle = prev_arm
                 else:
                     print("# حذف قراءات الحساسات الأخيرة")
             else:
@@ -364,7 +383,7 @@ try:
             max_dist = max(int(round(abs(diff_dist))) + SEARCH_MARGIN, MIN_SEARCH)
             segs.append(("find_line", (direction, max_dist)))
 
-            if push_action("move", segs, last_distance, last_heading):
+            if push_action("move", segs, last_distance, last_heading, last_arm_angle):
                 for seg in segs:
                     print(format_seg(seg))
                 last_distance = curr_distance
@@ -390,7 +409,7 @@ try:
                 segs.append(("follow_line", (int(round(abs(diff_dist))), FOLLOW_SIDE)))
 
             if segs:
-                if push_action("move", segs, last_distance, last_heading):
+                if push_action("move", segs, last_distance, last_heading, last_arm_angle):
                     for seg in segs:
                         print(format_seg(seg))
                     last_distance = curr_distance
@@ -403,33 +422,42 @@ try:
         elif Button.RIGHT in pressed:
             curr_distance = robot.distance()
             curr_heading  = hub.imu.heading()
+            curr_arm      = arm_motor.angle()
 
             diff_dist = curr_distance - last_distance
             diff_head = curr_heading - last_heading  # درجات (موجب = مع عقارب الساعة)
+            diff_arm  = curr_arm - last_arm_angle    # درجات محرك المنفذ D
 
             did_straight = False
             did_turn = False
+            did_arm = False
             segs = []
 
-            # الدوران أولاً ثم المستقيم (ترتيب "نقطة الطريق": وجّه ثم سِر)
+            # الدوران أولاً ثم المستقيم ثم محرك الذراع D
             if abs(diff_head) >= MIN_ANG:
                 segs.append(("turn", int(round(diff_head))))
                 did_turn = True
             if abs(diff_dist) >= MIN_DIST:
                 segs.append(("straight", int(round(diff_dist))))
                 did_straight = True
+            if abs(diff_arm) >= MIN_ARM_ANG:
+                segs.append(("arm", int(round(diff_arm))))
+                did_arm = True
 
             if segs:
                 # نحفظ المرجع السابق داخل العنصر حتى يستعيده التراجع
-                if push_action("move", segs, last_distance, last_heading):
+                if push_action("move", segs, last_distance, last_heading, last_arm_angle):
                     for seg in segs:
                         print(format_seg(seg))
-                    last_distance = curr_distance
-                    last_heading  = curr_heading
+                    last_distance  = curr_distance
+                    last_heading   = curr_heading
+                    last_arm_angle = curr_arm
                     if did_turn:
                         hub.speaker.beep(800, 80)
                     if did_straight:
                         hub.speaker.beep(600, 80)
+                    if did_arm:
+                        hub.speaker.beep(700, 80)
             else:
                 print("# حركة أصغر من العتبة - تم تجاهلها")
 
@@ -461,3 +489,4 @@ finally:
     hub.light.on(Color.RED)
     left_motor.stop()
     right_motor.stop()
+    arm_motor.stop()

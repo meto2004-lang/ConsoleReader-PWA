@@ -274,7 +274,18 @@ test("رسالة السبب تفرّق بين «لا أوامر» و«أوامر
     /داخل دالة|غير مدعومة/);
 });
 
+test("يحوّل أوامر محرك المنفذ D (arm_motor.run_angle) إلى M", () => {
+  const src = "def run():\n    arm_motor.run_angle(300, 90)\n    arm_motor.run_angle(-45)\nrun()\n";
+  const r = api.programToRobotLines(src);
+  assert.deepEqual(r.lines, ["M 90", "M -45"]);
+  assert.deepEqual(r.skipped, []);
+  const chk = api.checkProgram(src);
+  assert.equal(chk.ok, true, chk.errors.join(" | "));
+  assert.equal(chk.lines, 2);
+});
+
 test("الفحص يعرض السبب ويذكر تحويل الأرقام", () => {
+
   const bad = api.checkProgram("print('x')\n");
   assert.equal(bad.ok, false);
   assert.match(bad.errors.join(" "), /لا يوجد أي أمر حركة/);
