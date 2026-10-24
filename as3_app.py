@@ -39,7 +39,22 @@ right_motor = Motor(Port.B)
 # محرك إضافي (ذراع / بوابة / مهام) على المنفذ D
 ARM_PORT        = Port.D
 ARM_PORT_LETTER = "D"          # يُطبع في البرنامج الناتج
-arm_motor = Motor(ARM_PORT)
+try:
+    arm_motor = Motor(ARM_PORT)
+except Exception:
+    arm_motor = None
+
+def get_arm():
+    # يعيد كائن محرك المنفذ D، ويحاول تهيئته مجددًا إن وُصل السلك بعد بدء البرنامج
+    global arm_motor
+    if arm_motor is None:
+        try:
+            arm_motor = Motor(ARM_PORT)
+            arm_motor.stop()
+            arm_motor.reset_angle(0)
+        except Exception:
+            arm_motor = None
+    return arm_motor
 
 # حساس ألوان واحد فقط، مركّب على المنفذ C.
 #   كل القراءات (عتبة الخط، البحث عن الخط، المحاذاة، متابعة الحافة) تعتمد
@@ -59,7 +74,7 @@ robot = DriveBase(left_motor, right_motor, WHEEL_DIAMETER, AXLE_TRACK)
 robot.use_gyro(True)  # نفس إعداد برنامج السباق (جيرو مفعّل)
 
 # إصدار برنامج الـ Hub — يظهر في سجل التطبيق ليعرف المستخدم أن النسخة محدَّثة
-HUB_VERSION = "6"
+HUB_VERSION = "7"
 
 # عتبات دنيا تتجاهل اهتزاز اليد
 MIN_DIST    = 5    # أقل من 5 مم = ضجيج
@@ -359,7 +374,8 @@ app_input.register(stdin)
 RC_SPEED     = 120  # مم/ث للدفع الأمامي/الخلفي — عدّله حسب روبوتك
 RC_TURN      = 90   # درجة/ث للدوران في المكان
                    # (موجب = يمين/مع عقارب الساعة، سالب = يسار — انظر handle_app_command)
-RC_ARM_SPEED = 200  # درجة/ث لتحريك محرك المنفذ D عن بعد (ذراع / بوابة)
+RC_ARM_SPEED = 350  # درجة/ث لتحريك محرك المنفذ D عن بعد (ذراع / بوابة)
+RC_ARM_MIN_FRAMES = 5  # أدنى نبضة (~150ms) عند النقرة السريعة حتى لا يلغي x أمر u في نفس اللحظة
 RC_ACCEL      = 900   # مم/ث²     — تسارع/تباطؤ القيادة (أعلى = أسرع استجابة)
 RC_TURN_ACCEL = 1200  # درجة/ث²   — تسارع/تباطؤ الدوران
 RC_FRAMES  = 20   # دورات الحلقة (~30-40ms للدورة) قبل الإيقاف التلقائي
@@ -379,7 +395,9 @@ rc_turn    = 0.0
 rc_driving = False
 
 rc_arm_frames  = 0      # عدّاد أمان محرك المنفذ D
+rc_arm_min     = 0      # عدّاد أدنى نبضة للنقرة السريعة
 rc_arm_target  = 0      # سرعة محرك المنفذ D المطلوبة
+rc_arm_speed   = 0      # آخر سرعة فعّالة لمحرك المنفذ D
 rc_arm_driving = False
 
 def _approach(cur, target, step):
@@ -402,30 +420,47 @@ def rc_drive(speed, turn):
 
 def rc_arm(speed):
     # يبدأ/يجدّد تحريك محرك المنفذ D عن بعد بينما الزر مضغوط
-    global rc_arm_frames, rc_arm_target, rc_arm_driving
+    global rc_arm_frames, rc_arm_min, rc_arm_target, rc_arm_speed, rc_arm_driving
+    m = get_arm()
+    if m is None:
+        print("# ⚠ لا يوجد محرك موصول على المنفذ D — تأكد من توصيل السلك في المخرج D")
+        hub.speaker.beep(250, 200)
+        return
     rc_arm_frames = RC_FRAMES
     rc_arm_target = speed
+    rc_arm_speed = speed
     if not rc_arm_driving:
+        rc_arm_min = RC_ARM_MIN_FRAMES
         hub.speaker.beep(350, 40)
         rc_arm_driving = True
-    arm_motor.run(int(speed))
+    m.run(int(speed))
 
 def rc_arm_stop():
     # إيقاف وتحرير محرك المنفذ D (coast) ليُحرَّك باليد بحرية
-    global rc_arm_frames, rc_arm_target, rc_arm_driving
+    global rc_arm_frames, rc_arm_min, rc_arm_target, rc_arm_speed, rc_arm_driving
     rc_arm_frames = 0
+    rc_arm_min = 0
     rc_arm_target = 0
+    rc_arm_speed = 0
     if rc_arm_driving:
         rc_arm_driving = False
-        arm_motor.stop()
+        m = get_arm()
+        if m is not None:
+            m.stop()
 
 def rc_halt():
     # طلب إيقاف ناعم: يُصفّر الهدف ويكمل rc_tick التباطؤ ثم يحرّر المحركات
-    global rc_frames, rc_target_speed, rc_target_turn
+    global rc_frames, rc_target_speed, rc_target_turn, rc_arm_target, rc_arm_frames
     rc_frames = 0
     rc_target_speed = 0
     rc_target_turn = 0
-    rc_arm_stop()
+    rc_arm_target = 0
+    if rc_arm_driving:
+        if rc_arm_min > 0:
+            # نقرة سريعة (وصل u ثم x في نفس الدورة): نترك المحرك يكمل النبضة القصيرة
+            rc_arm_frames = rc_arm_min
+        else:
+            rc_arm_stop()
 
 def rc_release():
     # تحرير المحركات (coast) ليُدفع الروبوت باليد بعده مباشرة
@@ -449,11 +484,17 @@ def rc_stop():
 
 def rc_tick():
     # خطوة واحدة: نقترب من الهدف بتسارع محدود، ثم تباطؤ تلقائي عند انتهاء المهلة
-    global rc_frames, rc_speed, rc_turn, rc_target_speed, rc_target_turn, rc_arm_frames
+    global rc_frames, rc_speed, rc_turn, rc_target_speed, rc_target_turn, rc_arm_frames, rc_arm_min
+    if rc_arm_min > 0:
+        rc_arm_min -= 1
     if rc_arm_frames > 0:
         rc_arm_frames -= 1
         if rc_arm_frames == 0:
             rc_arm_stop()
+        elif rc_arm_driving:
+            m = get_arm()
+            if m is not None:
+                m.run(int(rc_arm_speed))
 
     if rc_frames > 0:
         rc_frames -= 1
@@ -478,7 +519,7 @@ def rc_halt_and_wait():
     # يوقف الدفع بنعومة، وينتظر السكون التام قبل أي أمر تدريب
     rc_halt()
     n = 0
-    while rc_driving and n < 25:   # حتى ~0.5 ثانية كحد أقصى
+    while (rc_driving or rc_arm_driving) and n < 25:   # حتى ~0.5 ثانية كحد أقصى
         rc_tick()
         wait(20)
         n += 1
@@ -839,14 +880,17 @@ def resync_tracking():
     global last_distance, last_heading, last_arm_angle
     last_distance  = robot.distance()
     last_heading   = hub.imu.heading()
-    last_arm_angle = arm_motor.angle()
+    m = get_arm()
+    last_arm_angle = m.angle() if m is not None else 0
 
 def _run_end(msg, freq):
     # brake وليس stop: التوقف الآمن يجب أن يكبح المحركات فورًا
     # (stop = coast، أي أن الروبوت قد يتابع مسافة محسوسة بعد الإلغاء).
     global run_active, beat_on
     robot.brake()
-    arm_motor.stop()
+    m = get_arm()
+    if m is not None:
+        m.stop()
     run_active = False
     beat_on = False
     resync_tracking()
@@ -923,28 +967,32 @@ def _run_step_turn(angle):
 
 def _run_step_arm(angle):
     global run_phase, run_goal_a, run_arm_last, run_arm_stall
+    m = get_arm()
+    if m is None:
+        print("# ⚠ لا يوجد محرك موصول على المنفذ D — تم تخطي حركة الذراع")
+        return True
     if run_phase == "start":
-        run_goal_a = arm_motor.angle() + angle
-        run_arm_last = arm_motor.angle()
+        run_goal_a = m.angle() + angle
+        run_arm_last = m.angle()
         run_arm_stall = 0
         run_phase = "go"
         return False
-    cur = arm_motor.angle()
+    cur = m.angle()
     err = run_goal_a - cur
     if abs(err) <= RUN_TOL_ARM:
-        arm_motor.brake()
+        m.brake()
         return True
     if abs(cur - run_arm_last) < 1:
         run_arm_stall += 1
         if run_arm_stall >= RUN_ARM_STALL_N:
             # وصلت الذراع لنهايتها الميكانيكية أو أمسكت المكعب: نتوقف بأمان
-            arm_motor.brake()
+            m.brake()
             return True
     else:
         run_arm_last = cur
         run_arm_stall = 0
     spd = int(_clamp(abs(err) * 5, 45, RUN_ARM_SPEED))
-    arm_motor.run(spd if err > 0 else -spd)
+    m.run(spd if err > 0 else -spd)
     return False
 
 def _run_step_find(direction, max_dist):
@@ -1172,7 +1220,8 @@ def do_record_move():
     global last_distance, last_heading, last_arm_angle
     curr_distance = robot.distance()
     curr_heading  = hub.imu.heading()
-    curr_arm      = arm_motor.angle()
+    m = get_arm()
+    curr_arm      = m.angle() if m is not None else last_arm_angle
 
     diff_dist = curr_distance - last_distance
     diff_head = curr_heading - last_heading  # درجات (موجب = مع عقارب الساعة)
@@ -1381,14 +1430,15 @@ for line in setup_lines(False):
 
 left_motor.stop()   # coast: تُترك المحركات حرة ليُدفع الروبوت باليد
 right_motor.stop()
-arm_motor.stop()    # coast: يُترك محرك المنفذ D حراً لتحريك الذراع باليد
-arm_motor.reset_angle(0)
+if get_arm() is not None:
+    arm_motor.stop()    # coast: يُترك محرك المنفذ D حراً لتحريك الذراع باليد
+    arm_motor.reset_angle(0)
 
 robot.reset()  # تصفير عدادات المسافة والزاوية (والجيرو)
 
 last_distance  = robot.distance()
 last_heading   = hub.imu.heading()
-last_arm_angle = arm_motor.angle()
+last_arm_angle = arm_motor.angle() if arm_motor is not None else 0
 
 hub.light.on(Color.BLUE)
 print("")
@@ -1483,4 +1533,5 @@ finally:
     rc_stop()
     left_motor.stop()
     right_motor.stop()
-    arm_motor.stop()
+    if arm_motor is not None:
+        arm_motor.stop()

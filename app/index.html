@@ -189,7 +189,12 @@
     <button class="btn-start grow" id="btnStart" disabled>▶ تشغيل برنامج التدريب على الروبوت</button>
     <button class="btn-stop" id="btnStop" disabled>⏹ إيقاف البرنامج</button>
   </div>
+  <div class="row">
+    <button id="btnCopyHubScript" class="grow" title="انسخ كود as3_app.py المحدّث (v7) والصقه في code.pybricks.com لتفعيل محرك الذراع على المنفذ D">📋 نسخ كود الروبوت المحدّث (as3_app.py v7)</button>
+    <button id="btnDownloadHubScript" title="تنزيل ملف as3_app.py المحدّث لرفعه إلى الـ Hub عبر Pybricks Code">⬇️ تنزيل as3_app.py</button>
+  </div>
 
+  <div class="warn" id="needHubUpdate" hidden>⚠️ <b>كود التدريب داخل الـ Hub قديم (<span id="oldHubVer">v6</span>) ولا يدعم تحريك محرك الذراع على المنفذ D!</b><br>اضغط زر <b>«📋 نسخ كود الروبوت المحدّث (as3_app.py v7)»</b> أعلاه، والصقه في <code>code.pybricks.com</code> وشغّله على الـ Hub مرة واحدة ليحفظ النسخة الجديدة.</div>
   <div class="warn" id="needConn">🔒 <b>غير متصل بالروبوت بعد</b> — أي ضغطة الآن لن تصل إلى الـ Hub. اضغط «🔵 اتصال بالبلوتوث» واختر الـ Hub، ثم «▶ تشغيل برنامج التدريب».</div>
   <div class="warn" id="needHttps" hidden></div>
 
@@ -198,8 +203,8 @@
 
   <div class="dash">
     <section class="pane">
-      <div class="pane-title">🕹️ تحريك الروبوت <small>— اضغط مع الاستمرار</small></div>
-      <p class="rc-note">الروبوت يتحرك ما دامت إصبعك على الزر، ويتوقف فور رفعه (وأيضًا بزر ⏹ أو مفتاح المسافة).<br>كل حركة عن بعد تُغيّر عدّاد المسافة والاتجاه، فـ «تسجيل حركة (R)» يسجّلها تمامًا كالتحريك اليدوي.</p>
+      <div class="pane-title">🕹️ تحريك الروبوت <small>— اضغط مع الاستمرار أو نقرة سريعة</small></div>
+      <p class="rc-note">الروبوت يتحرك ما دامت إصبعك على الزر، ويتوقف فور رفعه (أو يتحرك نبضة قصيرة عند النقر السريع).<br>كل حركة عن بعد تُغيّر عدّاد المسافة والاتجاه وزاوية الذراع، فـ «تسجيل حركة (R)» يسجّلها تمامًا كالتحريك اليدوي.</p>
       <div class="rcpad" id="rcPad">
         <button class="rc" id="rcFwd" style="grid-column:2;grid-row:1" title="اضغط مع الاستمرار">
           <span class="icon">⬆️</span><span class="name">للأمام</span><span class="key">ArrowUp / W</span>
@@ -213,11 +218,11 @@
         <button class="rc" id="rcBack" style="grid-column:2;grid-row:3" title="اضغط مع الاستمرار">
           <span class="icon">⬇️</span><span class="name">للخلف</span><span class="key">ArrowDown / S</span>
         </button>
-        <button class="rc" id="rcArmDown" style="grid-column:1;grid-row:4" title="تحريك محرك المنفذ D بالاتجاه السالب (اضغط مع الاستمرار)">
-          <span class="icon">🔽</span><span class="name">محرك D −</span><span class="key">KeyE / E</span>
+        <button class="rc" id="rcArmDown" style="grid-column:1;grid-row:4" title="تحريك محرك المنفذ D بالاتجاه السالب (اضغط مع الاستمرار أو انقر)">
+          <span class="icon">🔽</span><span class="name">محرك D −</span><span class="key">E / J / -</span>
         </button>
-        <button class="rc" id="rcArmUp" style="grid-column:3;grid-row:4" title="تحريك محرك المنفذ D بالاتجاه الموجب (اضغط مع الاستمرار)">
-          <span class="icon">🔼</span><span class="name">محرك D +</span><span class="key">KeyQ / Q</span>
+        <button class="rc" id="rcArmUp" style="grid-column:3;grid-row:4" title="تحريك محرك المنفذ D بالاتجاه الموجب (اضغط مع الاستمرار أو انقر)">
+          <span class="icon">🔼</span><span class="name">محرك D +</span><span class="key">Q / +</span>
         </button>
         <button class="rc rc-stop" id="rcStop" style="grid-row:5">
           <span class="icon">⏹</span><span class="name">إيقاف فوري + حرر المحركات</span><span class="key">Space</span>
@@ -511,7 +516,21 @@ function appendLog(text) {
     else if (line.indexOf("# ✓ استُلم الكود") >= 0)
       showToast("📥 " + line.replace(/^#\s*/, ""), "ok", 3500);
     if (line.indexOf("# برنامج السباق الذكي") >= 0) allowFill = true;   // برنامج جديد مطبوع
-    if (line.indexOf("# HUB_VERSION") === 0) hubVersion = line.replace("# HUB_VERSION", "").trim();
+    if (line.indexOf("# HUB_VERSION") === 0) {
+      hubVersion = line.replace("# HUB_VERSION", "").trim();
+    } else {
+      const aliveVer = line.match(/# ✓ HUB_ALIVE v(\d+)/);
+      if (aliveVer) hubVersion = aliveVer[1];
+    }
+    if (hubVersion && Number(hubVersion) > 0 && Number(hubVersion) < 7) {
+      if ($("oldHubVer")) $("oldHubVer").textContent = "v" + hubVersion;
+      if ($("needHubUpdate")) $("needHubUpdate").hidden = false;
+    } else if (hubVersion && Number(hubVersion) >= 7) {
+      if ($("needHubUpdate")) $("needHubUpdate").hidden = true;
+    }
+    if (line.indexOf("لا يوجد محرك موصول على المنفذ D") >= 0) {
+      showToast(line.replace(/^#\s*/, ""), "err", 7000);
+    }
     // عيّنات # T تُحفظ بطابع زمني حقيقي (CSV) بدل الزمن التقديري
     const tel = line.match(/^# T d=(-?[\d.]+) h=(-?[\d.]+) C=([\d.]+)/);
     if (tel) {
@@ -728,7 +747,7 @@ function sendAndShow(ch) {
   return sent;
 }
 
-// ===== التحكم عن بعد: اضغط مع الاستمرار =====
+// ===== التحكم عن بعد: اضغط مع الاستمرار (أو نقرة سريعة) =====
 const RC = { // أحرف التحكم التي يتوقعها as3_app.py
   fwd: "w", back: "s", left: "a", right: "d", armUp: "u", armDown: "j", stop: "x"
 };
@@ -737,26 +756,52 @@ const RC_LABELS = {
   u: "تحريك محرك D (+)", j: "تحريك محرك D (−)", x: "إيقاف + حرر المحركات"
 };
 const RC_KEEPALIVE_MS = 250; // نُعيد الأمر أثناء الاستمرار؛ الروبوت يتوقف تلقائيًا إذا انقطع
-let rcActive = null, rcTimer = null;
+const RC_MIN_HOLD_MS = 180;  // الحد الأدنى لنبضة النقر السريع قبل إرسال x حتى يدور المحرك فعليًا
+let rcActive = null, rcTimer = null, rcStartTime = 0, rcStopDelayTimer = null;
 
 function rcStart(ch, btn) {
+  if (rcStopDelayTimer) { clearTimeout(rcStopDelayTimer); rcStopDelayTimer = null; }
   if (rcActive === ch) return;
-  rcStop(true); // إن كان زر آخر مضغوطًا
+  rcStop(true, true); // إن كان زر آخر مضغوطًا نوقفه فورًا
   if (!mode) {
     showToast("✗ «" + RC_LABELS[ch] + "» غير متاح — غير متصل بالروبوت."
       + " اضغط «🔵 اتصال بالبلوتوث» واختر الـ Hub أولًا.", "err");
     return;
   }
+  if ((ch === RC.armUp || ch === RC.armDown) && hubVersion && Number(hubVersion) > 0 && Number(hubVersion) < 7) {
+    showToast("⚠ كود الـ Hub الحالي (v" + hubVersion + ") قديم ولا يعرف أوامر محرك المنفذ D —"
+      + " اضغط «📋 نسخ كود الروبوت المحدّث (as3_app.py v7)» في الأعلى وارفعه إلى الـ Hub عبر Pybricks Code.", "err", 8000);
+  }
   rcActive = ch;
+  rcStartTime = Date.now();
   if (btn) btn.classList.add("active");
   sendCmd(ch);
   showToast("🎮 " + RC_LABELS[ch] + " — أفلت الزر للإيقاف");
   rcTimer = setInterval(() => sendCmd(ch), RC_KEEPALIVE_MS);
 }
-function rcStop(quiet) {
+function rcStop(quiet, immediate) {
   if (rcTimer) { clearInterval(rcTimer); rcTimer = null; }
+  if (rcStopDelayTimer) { clearTimeout(rcStopDelayTimer); rcStopDelayTimer = null; }
+  if (rcActive === null) {
+    document.querySelectorAll(".rc.active").forEach(b => b.classList.remove("active"));
+    return;
+  }
+  const elapsed = Date.now() - rcStartTime;
+  if (!immediate && mode && elapsed < RC_MIN_HOLD_MS) {
+    // نقرة سريعة على الزر أو لوحة المفاتيح: نترك المحرك يكمل نبضة قصيرة (180ms) بدل إيقافه في 0ms
+    const waitMs = RC_MIN_HOLD_MS - elapsed;
+    rcStopDelayTimer = setTimeout(() => {
+      rcStopDelayTimer = null;
+      document.querySelectorAll(".rc.active").forEach(b => b.classList.remove("active"));
+      if (rcActive !== null) {
+        rcActive = null;
+        if (mode) sendCmd(RC.stop);
+        if (!quiet) showToast("⏹ توقف الحركة عن بعد");
+      }
+    }, waitMs);
+    return;
+  }
   document.querySelectorAll(".rc.active").forEach(b => b.classList.remove("active"));
-  if (rcActive === null) return;
   rcActive = null;
   if (mode) sendCmd(RC.stop);   // لا نرسل بعد قطع الاتصال (لا معنى ولن يصل)
   if (!quiet) showToast("⏹ توقف الحركة عن بعد");
@@ -784,8 +829,8 @@ RC_HOLD.forEach(([id, ch]) => {
   });
   btn.addEventListener("keyup", e => { if (e.code === "Enter") rcStop(); });
 });
-$("rcStop").addEventListener("click", () => rcStop());
-$("rcStop").addEventListener("pointerdown", e => { e.preventDefault(); $("rcStop").classList.add("active"); rcStop(); });
+$("rcStop").addEventListener("click", () => rcStop(false, true));
+$("rcStop").addEventListener("pointerdown", e => { e.preventDefault(); $("rcStop").classList.add("active"); rcStop(false, true); });
 
 // قراءة الحساسات تلقائيًا: y = تشغيل، z = إيقاف
 $("chkAutoRead").addEventListener("change", e => {
@@ -810,8 +855,8 @@ const RC_CODE = {
   ArrowDown: RC.back, KeyS: RC.back,
   ArrowLeft: RC.left, KeyA: RC.left,
   ArrowRight: RC.right, KeyD: RC.right,
-  KeyQ: RC.armUp,
-  KeyE: RC.armDown
+  KeyQ: RC.armUp, Equal: RC.armUp, NumpadAdd: RC.armUp, PageUp: RC.armUp,
+  KeyE: RC.armDown, KeyJ: RC.armDown, Minus: RC.armDown, NumpadSubtract: RC.armDown, PageDown: RC.armDown
 };
 const TRAIN_CODE = { KeyR: "R", KeyL: "L", KeyF: "F", KeyT: "T", KeyU: "U", KeyC: "C" };
 const isTyping = t => t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA");
@@ -830,7 +875,7 @@ document.addEventListener("keydown", e => {
     // داخل حقل كتابة: المسافة حرف عادي — لا تُرسل «x» للروبوت مع كل فراغ
     if (isTyping(e.target)) return;
     e.preventDefault();
-    rcStop();
+    rcStop(false, true);
     return;
   }
   // أوامر التدريب: R L F T U C
@@ -843,11 +888,37 @@ document.addEventListener("keyup", e => {
   if (ch && rcActive === ch) rcStop();
 });
 // أمان: نوقف كل شيء إذا خرجت النافذة أو اختفى الاتصال
-window.addEventListener("blur", () => rcStop(true));
+window.addEventListener("blur", () => rcStop(true, true));
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) rcStop(true);
+  if (document.hidden) rcStop(true, true);
   else requestWakeLock();     // المتصفح يحرّر القفل عند إخفاء الصفحة
 });
+// ===== نسخ / تنزيل كود التدريب المحدّث (as3_app.py v7) لرفعه إلى الـ Hub =====
+async function fetchHubScript() {
+  try {
+    const res = await fetch("../as3_app.py?v=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.text();
+  } catch (e) {
+    showToast("✗ تعذّر جلب ملف as3_app.py (" + e.message + ")", "err", 6000);
+    return null;
+  }
+}
+if ($("btnCopyHubScript")) {
+  $("btnCopyHubScript").onclick = async () => {
+    const code = await fetchHubScript();
+    if (!code) return;
+    copyText(code, "✅ تم نسخ كود as3_app.py (v7) — افتح code.pybricks.com والصقه وشغّله على الـ Hub مرة واحدة!");
+  };
+}
+if ($("btnDownloadHubScript")) {
+  $("btnDownloadHubScript").onclick = async () => {
+    const code = await fetchHubScript();
+    if (!code) return;
+    downloadText("as3_app.py", code, "text/x-python");
+    showToast("⬇️ تم تنزيل as3_app.py (v7) — ارفعه إلى الـ Hub عبر code.pybricks.com", "ok", 5000);
+  };
+}
 // ===== ربط الواجهة =====
 $("btnConnect").onclick = () => connect(false);
 $("btnConnectAny").onclick = () => connect(true);
