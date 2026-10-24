@@ -610,5 +610,104 @@ class ExecutionTests(unittest.TestCase):
         self.assertGreaterEqual(m.arm_motor.braked, 1)
 
 
+class AutoRecordWroTests(unittest.TestCase):
+    """اختبارات التسجيل التلقائي الذكي للمسار بدون أزرار (WRO 2026)."""
+
+    def _sample(self, m, n=1):
+        for _ in range(n * m.AUTO_SAMPLE_EVERY):
+            m.auto_read_tick()
+
+    def test_auto_records_straight_and_snaps_90_turn_on_pause(self):
+        m = hub_loader.load_app()
+        m.actions.clear()
+        m.AUTO_PRINT_PROG = False
+        m.resync_tracking()
+        m.line_sensor.reflection_value = 85
+
+        # 1) دفع مستقيم 250 مم مع انحراف يد بسيط (3 درجات) ← يُتجاهل الانحراف ويُسجّل مستقيم صافٍ
+        m.robot.distance_value = 250
+        m.hub.imu.heading_value = 3
+        self._sample(m, 1)
+        self._sample(m, m.AUTO_SETTLE_TICKS)
+        self.assertEqual(len(m.actions), 1)
+        self.assertEqual(m.actions[-1][1], [("straight", 250)])
+        self.assertEqual(m.last_heading, 0)  # بقي المرجع مثبّتًا عند 0°
+
+        # 2) دوران باليد إلى 87 درجة ثم توقف ← يُثبّت تلقائيًا إلى 90 درجة بالضبط
+        m.hub.imu.heading_value = 87
+        self._sample(m, 1)
+        self._sample(m, m.AUTO_SETTLE_TICKS)
+        self.assertEqual(len(m.actions), 2)
+        self.assertEqual(m.actions[-1][1], [("turn", 90)])
+        self.assertEqual(m.last_heading, 90)
+
+    def test_auto_detects_find_line_when_stopping_on_black(self):
+        m = hub_loader.load_app()
+        m.actions.clear()
+        m.AUTO_PRINT_PROG = False
+        m.resync_tracking()
+        m.th_pinned = 45
+
+        # يبدأ على الأبيض (88) ويتحرك حتى يقف فوق خط التوقف الأسود T-end (12)
+        m.line_sensor.reflection_value = 88
+        m.robot.distance_value = 90
+        self._sample(m, 1)
+        m.line_sensor.reflection_value = 12
+        m.robot.distance_value = 180
+        self._sample(m, 1)
+        self._sample(m, m.AUTO_SETTLE_TICKS)
+
+        self.assertEqual(len(m.actions), 1)
+        self.assertEqual(m.actions[-1][1], [("find_line", (1, 180 + m.SEARCH_MARGIN))])
+
+    def test_auto_detects_follow_line_when_walking_along_black_line(self):
+        m = hub_loader.load_app()
+        m.actions.clear()
+        m.AUTO_PRINT_PROG = False
+        m.resync_tracking()
+        m.th_pinned = 45
+
+        # يمشي 200 مم على الخط الأسود (قراءات داكنة متتالية)
+        m.line_sensor.reflection_value = 15
+        for step_d in (50, 100, 150, 200):
+            m.robot.distance_value = step_d
+            self._sample(m, 1)
+        self._sample(m, m.AUTO_SETTLE_TICKS)
+
+        self.assertEqual(len(m.actions), 1)
+        self.assertEqual(m.actions[-1][1], [("follow_line", (200, m.FOLLOW_SIDE))])
+
+    def test_auto_records_arm_port_d_and_toggles_commands(self):
+        m = hub_loader.load_app()
+        m.actions.clear()
+        m.AUTO_PRINT_PROG = False
+        m.resync_tracking()
+
+        # تحريك محرك الذراع Port.D إلى -110 درجات ثم التوقف
+        m.arm_motor.angle_value = -110
+        self._sample(m, 1)
+        self._sample(m, m.AUTO_SETTLE_TICKS)
+        self.assertEqual(len(m.actions), 1)
+        self.assertEqual(m.actions[-1][1], [("arm", -110)])
+
+        # أوامر التحكم من التطبيق (m/n, g/h, i/o, 0)
+        hub_loader.feed(m, "n")
+        self.assertFalse(m.AUTO_RECORD)
+        hub_loader.feed(m, "m")
+        self.assertTrue(m.AUTO_RECORD)
+        hub_loader.feed(m, "h")
+        self.assertFalse(m.SNAP_90)
+        hub_loader.feed(m, "g")
+        self.assertTrue(m.SNAP_90)
+        hub_loader.feed(m, "o")
+        self.assertFalse(m.AUTO_LINE_DETECT)
+        hub_loader.feed(m, "i")
+        self.assertTrue(m.AUTO_LINE_DETECT)
+
+        # الأمر 0 يمسح المسار ويصفّر نقطة القياس
+        hub_loader.feed(m, "0")
+        self.assertEqual(m.actions, [])
+
+
 if __name__ == "__main__":
     unittest.main()
