@@ -35,45 +35,10 @@ await new Promise(r => setTimeout(r, 300));
 const results = [];
 const check = (name, cond, extra) => results.push((cond ? "✓ " : "✗ ") + name + (cond ? "" : "  ← " + (extra || "")));
 
-// الواجهة الأساسية
-check("المحرّر موجود", !!d.getElementById("codeEditor"));
-check("المكتبة تبدي رسالة فارغة", /لا برامج محفوظة/.test(d.getElementById("libList").textContent));
-check("قائمة الـ Hub تطلب الاتصال", /اتصل بالروبوت/.test(d.getElementById("hubList").textContent));
-
-// أرقام الأسطر
-const ed = d.getElementById("codeEditor");
-ed.value = "robot.turn(90)\nrobot.straight(200)\n";
-ed.dispatchEvent(new w.Event("input", { bubbles: true }));
-check("أرقام الأسطر تتحدّث", d.getElementById("edGutter").textContent.trim() === "1\n2\n3",
-  JSON.stringify(d.getElementById("edGutter").textContent));
-
-// الفحص: سليم ثم مرفوض
-d.getElementById("btnCheckCode").click();
-const rep = d.getElementById("codeReport");
-check("تقرير الفحص ظاهر", rep.hidden === false);
-check("الفحص السليم أخضر", /rep-ok/.test(rep.className), rep.className);
-check("يعرض عدد الأوامر", /أوامر ستُرسل: <b>2<\/b>/.test(rep.innerHTML));
-ed.value = "robot.turn(90\nrobot.straight(200)\n";
-ed.dispatchEvent(new w.Event("input", { bubbles: true }));
-d.getElementById("btnCheckCode").click();
-check("الفحص الناقص أحمر", /rep-err/.test(rep.className), rep.className);
-check("يذكر رقم السطر", /سطر 1/.test(rep.innerHTML));
-
-// المكتبة: حفظ ← تحميل ← حذف
-ed.value = "LINE_THRESHOLD = 40\nrobot.straight(300)\n";
-d.getElementById("libName").value = "مسار تجريبي";
-d.getElementById("btnSaveLib").click();
-const stored = JSON.parse(w.localStorage.getItem("cr_library_v1") || "[]");
-check("حُفظ البرنامج في localStorage", stored.length === 1 && stored[0].name === "مسار تجريبي");
-check("العنصر ظهر في القائمة", /مسار تجريبي/.test(d.getElementById("libList").textContent));
-check("فيه زر تشغيل", !!d.querySelector("#libList .libitem button.run"));
-d.querySelector("#libList .libitem button").click();
-check("التحميل يعيد الكود للمحرّر", ed.value.includes("robot.straight(300)"), ed.value);
-d.querySelector("#libList .libitem button.del").click();
-check("الحذف يفرّغ المكتبة", JSON.parse(w.localStorage.getItem("cr_library_v1") || "[]").length === 0);
-
-// حماية: لا إرسال بلا اتصال
-check("إرسال المحرّر معطّل بلا اتصال", d.getElementById("btnEditorSend").disabled === true);
+// الواجهة الأساسية (تمت إزالة قسم استوديو البرمجة بناءً على طلب المستخدم)
+check("قسم استوديو البرمجة غير موجود", !d.getElementById("codeEditor") && !d.getElementById("libList"));
+check("لوحة البرنامج الجاهز موجودة", !!d.getElementById("progOut"));
+check("أزرار محرك المنفذ D موجودة", !!d.getElementById("rcArmUp") && !!d.getElementById("rcArmDown"));
 
 // ===== إرسال الكود وتشغيله: سباق التأكيد =====
 // الـ Hub يؤكّد الاستلام فور وصول E، أي قبل انتهاء آخر كتابة BLE.
@@ -132,11 +97,6 @@ d.querySelector('.train[data-cmd="R"]').click();
 const toast = d.getElementById("toast");
 check("زر R بلا اتصال يُظهر رسالة", toast.hidden === false && /غير متصل/.test(toast.textContent),
   toast.textContent.slice(0, 60));
-
-// Tab يُدخل مسافتين بدل نقل التركيز
-ed.value = "robot"; ed.selectionStart = ed.selectionEnd = 5;
-ed.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
-check("Tab يُدخل مسافتين", ed.value === "robot  ", JSON.stringify(ed.value));
 
 console.log(results.join("\n"));
 console.log("\nأخطاء الصفحة: " + (pageErrors.length ? pageErrors.slice(0, 5).join("\n") : "لا شيء"));
